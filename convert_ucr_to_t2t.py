@@ -10,7 +10,9 @@ import stat
 
 # --- Configuration ---
 # Excel file URL (Supplementary Table S1 from PMC6857462)
-# Table S1 provides the clean, non-redundant list of 481 UCRs with gene overlap info
+# Table S1 lists genes overlapping UCEs from the Stephen et al. 2008 catalogue
+# (UCR IDs run to 13,736 for the ≥100 bp set; 2,189 for the ≥200 bp set).
+# Rows without a chromosome assignment are excluded during coordinate extraction.
 EXCEL_URL = "https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx"
 
 # UCSC LiftOver binary and chain file URLs
@@ -32,7 +34,12 @@ LIFTOVER_BIN = _container_liftover if os.path.exists(_container_liftover) \
 
 # Data files always land in OUTPUT_DIR (downloaded at runtime)
 CHAIN_FILE = os.path.join(OUTPUT_DIR, "hg38ToHs1.over.chain.gz")
-EXCEL_FILE = os.path.join(OUTPUT_DIR, "Supp_TableS1.xlsx")
+
+# Prefer the bundled resources file (checked into the repo) if available;
+# fall back to downloading into OUTPUT_DIR when running outside the repo.
+_bundled_excel = os.path.normpath(os.path.join(SCRIPT_DIR, "resources", "Supp_TableS1.xlsx"))
+EXCEL_FILE = _bundled_excel if os.path.exists(_bundled_excel) \
+    else os.path.join(OUTPUT_DIR, "Supp_TableS1.xlsx")
 
 HG38_BED = os.path.join(OUTPUT_DIR, "ucr_hg38.bed")
 T2T_BED = os.path.join(OUTPUT_DIR, "ucr_t2t_chm13.bed")
@@ -93,6 +100,10 @@ def extract_coordinates():
 
     # Table S1 may list the same UCR multiple times if it overlaps multiple genes
     ucr_df = df[['Chr.', 'UCR start (bp)', 'UCR end (bp)', 'UCR ID']].drop_duplicates()
+
+    # Drop rows where the chromosome is missing (gene-level rows without a
+    # chromosome assignment produce NaN in the Chr. column)
+    ucr_df = ucr_df.dropna(subset=['Chr.'])
 
     # Normalise chromosome names to UCSC 'chrN' convention
     ucr_df['Chr.'] = ucr_df['Chr.'].apply(normalize_chrom)
@@ -291,8 +302,12 @@ def generate_audit_report(hg38_df):
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # 1. Download data files to OUTPUT_DIR (large files, always at runtime)
-    download_file(EXCEL_URL, EXCEL_FILE)
+    # 1. Download data files.
+    # Excel: use the bundled resources file when available; download otherwise.
+    if EXCEL_FILE == os.path.join(OUTPUT_DIR, "Supp_TableS1.xlsx"):
+        download_file(EXCEL_URL, EXCEL_FILE)
+    else:
+        print(f"Using bundled Excel file: {EXCEL_FILE}")
     download_file(CHAIN_URL, CHAIN_FILE)
 
     # liftOver binary is baked into the container; download only for local runs

@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY convert_ucr_to_t2t.py .
 COPY validate_liftover.py .
+COPY resources/ ./resources/
 
 # Bake the UCSC binaries into the image (small tools, ~3 MB each).
 # Large data files (chain file, Excel, genomes) are downloaded at runtime.
