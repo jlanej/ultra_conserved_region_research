@@ -15,7 +15,7 @@ EXCEL_URL = "https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_Tab
 
 # UCSC LiftOver binary and chain file URLs
 LIFTOVER_URL = "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver"
-CHAIN_URL = "https://hgdownload.soe.ucsc.edu/hubs/GCA/009/914/755/GCA_009914755.4/liftOver/hg38ToHs1.over.chain.gz"
+CHAIN_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHs1.over.chain.gz"
 
 # --- Path resolution ---
 # The liftOver binary is baked into the container image alongside the script.

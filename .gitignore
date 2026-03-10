@@ -15,7 +15,9 @@ env/
 # Data files (downloaded at runtime)
 *.xlsx
 liftOver
+twoBitToFa
 *.over.chain.gz
+*.2bit
 *.sif
 
 # IDE

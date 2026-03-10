@@ -1,6 +1,6 @@
 # Ultra Conserved Region Research
 
-Automated pipeline to lift over the 481 human **Ultraconserved Regions (UCRs)** from the GRCh38/hg38 reference assembly to the T2T-CHM13v2.0 (Hs1) telomere-to-telomere assembly.
+Automated pipeline to lift over the 481 human **Ultraconserved Regions (UCRs)** from the GRCh38/hg38 reference assembly to the T2T-CHM13v2.0 (Hs1) telomere-to-telomere assembly, with optional per-base sequence validation.
 
 ## Background
 
@@ -22,6 +22,8 @@ The first data row looks like:
 
 ## How it works
 
+### Step 1 – Liftover (`convert_ucr_to_t2t.py`)
+
 1. **Download** – The script downloads the Excel file and the
    `hg38ToHs1.over.chain.gz` chain file at runtime.  The UCSC
    [`liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) binary is bundled
@@ -34,7 +36,7 @@ The first data row looks like:
    generated pairing every input UCR with its liftover result, including:
    mapping status, coordinate shifts, size deltas, chromosome concordance,
    and SHA-256 checksums of input files for full reproducibility.
-5. **Output** – Four files are produced in the working directory:
+5. **Output** – Four files are produced in the output directory:
 
 | File | Description |
 |---|---|
@@ -42,6 +44,72 @@ The first data row looks like:
 | `ucr_t2t_chm13.bed` | Successfully mapped coordinates on T2T-CHM13 |
 | `ucr_unmapped.bed` | Unmapped regions with liftOver failure reasons |
 | `ucr_liftover_audit.tsv` | Full audit report for QC and traceability |
+
+### Step 2 – Sequence validation (`validate_liftover.py`)
+
+An optional validation step that extracts the actual genomic sequences
+underlying each UCR from both reference assemblies and performs per-base
+pairwise alignment to confirm sequence identity across the liftover.
+
+1. **Download genomes** – The hg38 and T2T-CHM13v2.0 reference genomes are
+   downloaded in UCSC 2bit format (~800 MB each, first run only).
+2. **Extract sequences** – The UCSC
+   [`twoBitToFa`](https://genome.ucsc.edu/goldenPath/help/twoBit.html) utility
+   extracts the UCR intervals from each 2bit file using the BED coordinates
+   produced by the liftover step, writing one FASTA file per assembly.
+3. **Pairwise alignment** – Each hg38 UCR sequence is paired with its
+   corresponding T2T-CHM13 sequence and aligned using a
+   [Needleman–Wunsch](https://en.wikipedia.org/wiki/Needleman%E2%80%93Wunsch_algorithm)
+   global pairwise alignment (via
+   [BioPython `PairwiseAligner`](https://biopython.org/docs/latest/api/Bio.Align.html#Bio.Align.PairwiseAligner)).
+   Identical-length pairs use a direct per-base comparison for efficiency;
+   pairs that differ in length receive a full gapped alignment.
+4. **Reports** – Two reports are generated:
+
+| File | Description |
+|---|---|
+| `ucr_sequences_hg38.fa` | Extracted hg38 UCR sequences (FASTA) |
+| `ucr_sequences_t2t.fa` | Extracted T2T-CHM13 UCR sequences (FASTA) |
+| `ucr_alignment_report.tsv` | Per-region alignment statistics (identity %, matches, mismatches, gaps) |
+| `ucr_alignment_details.txt` | Visual base-by-base alignments for any non-identical pairs |
+
+## Software and dependencies
+
+### External tools (bundled in container images)
+
+| Tool | Version | Source | Purpose |
+|---|---|---|---|
+| [UCSC `liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Coordinate conversion between genome assemblies |
+| [UCSC `twoBitToFa`](https://genome.ucsc.edu/goldenPath/help/twoBit.html) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Sequence extraction from 2bit genome files |
+
+Both binaries are baked into the Docker and Apptainer container images at
+build time. For bare-metal runs they are downloaded automatically on first
+execution.
+
+### Python dependencies (`requirements.txt`)
+
+| Package | Purpose |
+|---|---|
+| [pandas](https://pandas.pydata.org/) | Tabular data manipulation (Excel → BED conversion) |
+| [openpyxl](https://openpyxl.readthedocs.io/) | Excel `.xlsx` file reading (pandas backend) |
+| [requests](https://docs.python-requests.org/) | HTTP client library |
+| [biopython](https://biopython.org/) | FASTA I/O (`Bio.SeqIO`) and Needleman–Wunsch pairwise alignment (`Bio.Align.PairwiseAligner`) |
+
+### Runtime data files (downloaded automatically)
+
+| File | Size | Source | Used by |
+|---|---|---|---|
+| `Supp_TableS1.xlsx` | ~50 KB | [PMC6857462 Supp. Table S1](https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx) | `convert_ucr_to_t2t.py` |
+| `hg38ToHs1.over.chain.gz` | ~10 MB | [UCSC goldenPath](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHs1.over.chain.gz) | `convert_ucr_to_t2t.py` |
+| `hg38.2bit` | ~800 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.2bit) | `validate_liftover.py` |
+| `hs1.2bit` | ~780 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hs1/bigZips/hs1.2bit) | `validate_liftover.py` |
+
+### Container platforms
+
+| Platform | Definition file | Notes |
+|---|---|---|
+| [Docker](https://www.docker.com/) | `Dockerfile` | Base image: `python:3.12-slim` |
+| [Apptainer](https://apptainer.org/) (formerly Singularity) | `Apptainer.def` | Recommended for HPC; no daemon required |
 
 ## Quick start — HPC one-liner (Apptainer)
 
@@ -71,29 +139,49 @@ apptainer build ucr-liftover.sif Apptainer.def
 apptainer run ucr-liftover.sif
 ```
 
+### Sequence validation (Apptainer)
+
+After the liftover completes, run the validation utility to extract sequences
+and perform pairwise alignment (downloads ~1.6 GB of genome data on first run):
+
+```bash
+apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest \
+    python /app/validate_liftover.py
+```
+
 ## Running locally
 
 ### Prerequisites
 
 - Python 3.10+
-- Linux x86-64 (the `liftOver` binary is platform-specific)
+- Linux x86-64 (the UCSC binaries are platform-specific)
 
 ### Steps
 
 ```bash
 pip install -r requirements.txt
+
+# Step 1: Liftover
 python convert_ucr_to_t2t.py
+
+# Step 2: Sequence validation (optional – downloads ~1.6 GB of genome data)
+python validate_liftover.py
 ```
 
-The script is self-contained: it downloads the Excel file, `liftOver` binary,
-and chain file automatically on first run.  Subsequent runs skip downloads if
-the files are already present.
+Both scripts are self-contained: they download all required data files and
+tools automatically on first run. Subsequent runs skip downloads if the files
+are already present.
 
 ### With Docker
 
 ```bash
 docker build -t ucr-liftover .
+
+# Step 1: Liftover
 docker run --rm -v "$(pwd)/results:/output" ucr-liftover
+
+# Step 2: Sequence validation (optional)
+docker run --rm -v "$(pwd)/results:/output" ucr-liftover /app/validate_liftover.py
 ```
 
 Results will appear in the `results/` directory.
@@ -102,9 +190,10 @@ Results will appear in the `results/` directory.
 
 ```
 .
-├── convert_ucr_to_t2t.py          # Main liftover script
+├── convert_ucr_to_t2t.py          # Liftover pipeline (hg38 → T2T-CHM13)
+├── validate_liftover.py           # Sequence extraction and pairwise alignment
 ├── requirements.txt               # Python dependencies
-├── Dockerfile                     # Containerised pipeline (Docker / GitHub Actions)
+├── Dockerfile                     # Docker container definition
 ├── Apptainer.def                  # Apptainer/Singularity definition (HPC)
 ├── .github/workflows/
 │   ├── docker-build-publish.yml   # Build & push image to GHCR
@@ -139,6 +228,57 @@ The audit report (`ucr_liftover_audit.tsv`) is a tab-separated file with:
 Regions flagged with `chrom_changed=YES` or non-zero `delta_length` deserve
 manual review. Unmapped regions include the failure reason from liftOver.
 
+## Alignment report
+
+The alignment report (`ucr_alignment_report.tsv`) contains one row per
+successfully lifted-over UCR with:
+
+- hg38 and T2T-CHM13 coordinates and sequence lengths
+- Whether the extracted sequences are identical (`YES` / `NO`)
+- Percent identity, match count, mismatch count, gap count, and aligned length
+
+The companion file `ucr_alignment_details.txt` provides visual base-by-base
+alignments for any non-identical pairs, making it easy to inspect exactly which
+positions differ.
+
+## Methods
+
+### Coordinate liftover
+
+UCR coordinates from [Giacopuzzi *et al.* 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC6857462/)
+Supplementary Table S1 are extracted and converted to BED format (0-based
+half-open intervals). Chromosome names are normalised to UCSC `chrN` convention.
+The UCSC `liftOver` tool maps each region from GRCh38/hg38 to T2T-CHM13v2.0
+(Hs1) using the `hg38ToHs1.over.chain.gz` chain file from the
+[UCSC goldenPath](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/).
+
+### Sequence extraction
+
+Reference genome sequences are obtained in UCSC
+[2bit format](https://genome.ucsc.edu/goldenPath/help/twoBit.html) — a
+compact binary encoding (~800 MB per genome). The UCSC `twoBitToFa` utility
+extracts the genomic intervals defined by each BED file, producing a
+multi-record FASTA file per assembly. Record names correspond to UCR IDs.
+
+### Pairwise alignment
+
+Each hg38 UCR sequence is globally aligned to its T2T-CHM13 counterpart using
+the Needleman–Wunsch algorithm as implemented by BioPython's
+[`PairwiseAligner`](https://biopython.org/docs/latest/api/Bio.Align.html#Bio.Align.PairwiseAligner)
+with the following scoring scheme:
+
+| Parameter | Value |
+|---|---|
+| Match score | +2 |
+| Mismatch score | −1 |
+| Gap open penalty | −3 |
+| Gap extend penalty | −0.5 |
+
+For equal-length sequence pairs, a direct per-base character comparison is
+used (no gaps possible), which is equivalent to a gap-free global alignment.
+Identity is reported as the fraction of aligned positions that are exact
+matches.
+
 ## References
 
 - Giacopuzzi, E. *et al.* (2020). "Population-scale distribution and copy number
@@ -148,3 +288,10 @@ manual review. Unmapped regions include the failure reason from liftOver.
 - Nurk, S. *et al.* (2022). "The complete sequence of a human genome."
   *Science*, 376(6588), 44–53.
   [doi:10.1126/science.abj6987](https://doi.org/10.1126/science.abj6987)
+- Hinrichs, A. S. *et al.* (2006). "The UCSC Genome Browser Database: update 2006."
+  *Nucleic Acids Research*, 34(suppl_1), D590–D598.
+  [doi:10.1093/nar/gkj144](https://doi.org/10.1093/nar/gkj144)
+- Cock, P. J. A. *et al.* (2009). "Biopython: freely available Python tools for
+  computational molecular biology and bioinformatics."
+  *Bioinformatics*, 25(11), 1422–1423.
+  [doi:10.1093/bioinformatics/btp163](https://doi.org/10.1093/bioinformatics/btp163)

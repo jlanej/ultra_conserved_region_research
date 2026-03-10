@@ -3,6 +3,7 @@
 *.bed
 *.xlsx
 *.chain.gz
+*.2bit
 __pycache__
 *.pyc
 .venv
