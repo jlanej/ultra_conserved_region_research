@@ -1,9 +1,19 @@
 Bootstrap: docker
-From: ghcr.io/jlanej/ultra_conserved_region_research:latest
+From: python:3.12-slim
 
 %labels
     Author jlanej
     Description UCR hg38-to-T2T-CHM13 liftover pipeline
+
+%files
+    convert_ucr_to_t2t.py /app/convert_ucr_to_t2t.py
+    requirements.txt /app/requirements.txt
+
+%post
+    apt-get update && \
+        apt-get install -y --no-install-recommends ca-certificates && \
+        rm -rf /var/lib/apt/lists/*
+    pip install --no-cache-dir -r /app/requirements.txt
 
 %environment
     export OUTPUT_DIR="${OUTPUT_DIR:-$(pwd)}"
@@ -13,13 +23,21 @@ From: ghcr.io/jlanej/ultra_conserved_region_research:latest
 
 %help
     Lift over the 481 Ultraconserved Regions from hg38 to T2T-CHM13v2.0.
+    All resources (liftOver binary, chain file, Excel data) are downloaded
+    automatically on first run.
 
-    Usage (one-liner):
+    One-liner (pulls image, runs pipeline, writes output to CWD):
         apptainer run docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
 
-    Or build a reusable SIF first:
+    Or build a local SIF from this definition file:
         apptainer build ucr-liftover.sif Apptainer.def
         apptainer run ucr-liftover.sif
 
-    Output BED files are written to the current working directory.
-    Override with:  OUTPUT_DIR=/my/path apptainer run ucr-liftover.sif
+    Output files:
+        ucr_hg38.bed            - input UCR coordinates (hg38)
+        ucr_t2t_chm13.bed       - mapped coordinates (T2T-CHM13)
+        ucr_unmapped.bed        - unmapped regions with reasons
+        ucr_liftover_audit.tsv  - full audit report for QC
+
+    Override output directory:
+        OUTPUT_DIR=/scratch/proj apptainer run ucr-liftover.sif

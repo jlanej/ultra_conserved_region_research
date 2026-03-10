@@ -16,6 +16,7 @@ env/
 *.xlsx
 liftOver
 *.over.chain.gz
+*.sif
 
 # IDE
 .idea/

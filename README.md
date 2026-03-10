@@ -22,31 +22,50 @@ The first data row looks like:
 
 ## How it works
 
-1. **Download** – The script fetches the Excel file and the UCSC
-   [`liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) binary together with
-   the `hg38ToHs1.over.chain.gz` chain file.
+1. **Download** – The script fetches the Excel file, the UCSC
+   [`liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) binary, and the
+   `hg38ToHs1.over.chain.gz` chain file at runtime into the working directory.
 2. **Extract** – Unique UCR coordinates (`Chr.`, `UCR start`, `UCR end`, `UCR ID`)
    are extracted from the spreadsheet. Chromosome names are normalised to `chrN`
-   format and start positions are converted from 1-based to 0-based for the BED
-   standard.
+   format and start positions are converted from 1-based to 0-based for BED.
 3. **Lift over** – `liftOver` maps each region from hg38 to T2T-CHM13v2.0.
-4. **Output** – Three BED files are produced:
-   - `ucr_hg38.bed` – input coordinates on hg38
-   - `ucr_t2t_chm13.bed` – successfully mapped coordinates on T2T-CHM13
-   - `ucr_unmapped.bed` – any regions that could not be mapped
+4. **Audit** – A comprehensive audit report (`ucr_liftover_audit.tsv`) is
+   generated pairing every input UCR with its liftover result, including:
+   mapping status, coordinate shifts, size deltas, chromosome concordance,
+   and SHA-256 checksums of input files for full reproducibility.
+5. **Output** – Four files are produced in the working directory:
 
-## Repository structure
+| File | Description |
+|---|---|
+| `ucr_hg38.bed` | Input UCR coordinates on hg38 |
+| `ucr_t2t_chm13.bed` | Successfully mapped coordinates on T2T-CHM13 |
+| `ucr_unmapped.bed` | Unmapped regions with liftOver failure reasons |
+| `ucr_liftover_audit.tsv` | Full audit report for QC and traceability |
 
+## Quick start — HPC one-liner (Apptainer)
+
+No Docker daemon required. [Apptainer](https://apptainer.org/) (formerly
+Singularity) is available on most HPC clusters. Everything downloads at runtime:
+
+```bash
+apptainer run docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
 ```
-.
-├── convert_ucr_to_t2t.py          # Main liftover script
-├── requirements.txt               # Python dependencies
-├── Dockerfile                     # Containerised pipeline (Docker / GitHub Actions)
-├── Apptainer.def                  # Apptainer/Singularity definition (HPC)
-├── .github/workflows/
-│   ├── docker-build-publish.yml   # Build & push image to GHCR
-│   └── ucr-liftover.yml           # Run liftover and commit results
-└── data/                          # (generated) BED output files
+
+That's it. All resources (liftOver binary, chain file, Excel data) and all output
+files land in your current working directory. No build step, no `pip install`,
+fully batteries-included.
+
+To write output to a specific directory:
+
+```bash
+OUTPUT_DIR=/scratch/my_project apptainer run docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
+```
+
+To build a reusable SIF image (useful on air-gapped nodes or for repeated runs):
+
+```bash
+apptainer build ucr-liftover.sif Apptainer.def
+apptainer run ucr-liftover.sif
 ```
 
 ## Running locally
@@ -63,8 +82,9 @@ pip install -r requirements.txt
 python convert_ucr_to_t2t.py
 ```
 
-The script is self-contained: it downloads the Excel file, the `liftOver` binary,
-and the chain file automatically on first run.
+The script is self-contained: it downloads the Excel file, `liftOver` binary,
+and chain file automatically on first run.  Subsequent runs skip downloads if
+the files are already present.
 
 ### With Docker
 
@@ -75,39 +95,18 @@ docker run --rm -v "$(pwd)/results:/output" ucr-liftover
 
 Results will appear in the `results/` directory.
 
-### On HPC with Apptainer (one-liner)
+## Repository structure
 
-No Docker daemon required. Apptainer (formerly Singularity) is available on most
-HPC clusters. Just run:
-
-```bash
-apptainer run docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
 ```
-
-Output BED files are written to the current working directory. That's it — no
-build step, no dependencies to install, fully batteries-included.
-
-To build a reusable SIF image (useful on air-gapped nodes or for repeated runs):
-
-```bash
-# Build once (requires internet)
-apptainer build ucr-liftover.sif docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
-
-# Run anywhere
-apptainer run ucr-liftover.sif
-```
-
-Or build from the definition file in this repository:
-
-```bash
-apptainer build ucr-liftover.sif Apptainer.def
-apptainer run ucr-liftover.sif
-```
-
-To write output to a specific directory:
-
-```bash
-OUTPUT_DIR=/scratch/my_project apptainer run ucr-liftover.sif
+.
+├── convert_ucr_to_t2t.py          # Main liftover script
+├── requirements.txt               # Python dependencies
+├── Dockerfile                     # Containerised pipeline (Docker / GitHub Actions)
+├── Apptainer.def                  # Apptainer/Singularity definition (HPC)
+├── .github/workflows/
+│   ├── docker-build-publish.yml   # Build & push image to GHCR
+│   └── ucr-liftover.yml           # Run liftover and commit results
+└── data/                          # (generated) BED + audit output files
 ```
 
 ## CI / CD
@@ -117,9 +116,25 @@ Two GitHub Actions workflows automate the full pipeline:
 | Workflow | Trigger | What it does |
 |---|---|---|
 | **Docker Build & Publish** | Push to `main` (when pipeline files change), manual | Builds the Docker image and pushes it to GitHub Container Registry (`ghcr.io`) |
-| **UCR Liftover** | After a successful Docker build, or manual | Pulls the latest image, runs the liftover, and commits the resulting BED files to `data/` |
+| **UCR Liftover** | After a successful Docker build, or manual | Pulls the latest image, runs the liftover, and commits the resulting BED + audit files to `data/` |
 
 To run manually, go to **Actions → UCR Liftover → Run workflow**.
+
+## Audit report
+
+The audit report (`ucr_liftover_audit.tsv`) is a tab-separated file with:
+
+- **Provenance header** — timestamp, source paper, assembly versions, SHA-256
+  checksums of input files
+- **Per-region columns** — `ucr_id`, `hg38_chrom`, `hg38_start`, `hg38_end`,
+  `hg38_length`, `status` (MAPPED/UNMAPPED), `t2t_chrom`, `t2t_start`,
+  `t2t_end`, `t2t_length`, `delta_length`, `delta_start`, `chrom_changed`,
+  `reason`
+- **Summary footer** — total/mapped/unmapped counts, chromosome-change and
+  size-change counts, mapping rate
+
+Regions flagged with `chrom_changed=YES` or non-zero `delta_length` deserve
+manual review. Unmapped regions include the failure reason from liftOver.
 
 ## References
 
