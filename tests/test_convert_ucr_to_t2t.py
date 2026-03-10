@@ -12,6 +12,7 @@ Covers:
 
 import csv
 import os
+import re
 import stat
 import sys
 import textwrap
@@ -467,3 +468,50 @@ class TestFullPipelineSmoke:
             f"{unmapped[:3]}"
         )
         assert len(rows) >= MIN_UCR_COUNT
+
+
+# ===========================================================================
+# 8. Container definitions include liftOver runtime dependencies
+# ===========================================================================
+
+
+class TestContainerDefinitions:
+    """Integration tests for container runtime package requirements."""
+
+    def _apt_installs_package(self, text, package):
+        apt_install = re.compile(r"\bapt-get\s+install\b")
+        blocks = []
+        block = []
+        collecting = False
+        for line in text.splitlines():
+            if apt_install.search(line):
+                collecting = True
+                block = []
+            if collecting:
+                block.append(line)
+                if not line.rstrip().endswith("\\"):
+                    blocks.append(block)
+                    collecting = False
+        for lines in blocks:
+            normalized = re.sub(r"\s+", " ", " ".join(lines).replace("\\", " "))
+            if re.search(rf"\b{re.escape(package)}\b", normalized):
+                return True
+        return False
+
+    def test_dockerfile_installs_libcurl4(self):
+        dockerfile = os.path.join(REPO_ROOT, "Dockerfile")
+        with open(dockerfile, encoding="utf-8") as fh:
+            text = fh.read()
+        assert self._apt_installs_package(text, "libcurl4"), (
+            "Dockerfile must install libcurl4 so UCSC liftOver can load "
+            "libcurl.so.4 at runtime."
+        )
+
+    def test_apptainer_installs_libcurl4(self):
+        apptainer_def = os.path.join(REPO_ROOT, "Apptainer.def")
+        with open(apptainer_def, encoding="utf-8") as fh:
+            text = fh.read()
+        assert self._apt_installs_package(text, "libcurl4"), (
+            "Apptainer definition must install libcurl4 so UCSC liftOver can load "
+            "libcurl.so.4 at runtime."
+        )
