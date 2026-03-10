@@ -13,17 +13,24 @@ import stat
 # Table S1 provides the clean, non-redundant list of 481 UCRs with gene overlap info
 EXCEL_URL = "https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx"
 
-# UCSC LiftOver and Chain File URLs
-LIFTOVER_URL = "http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver"
+# UCSC LiftOver binary and chain file URLs
+LIFTOVER_URL = "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver"
 CHAIN_URL = "https://hgdownload.soe.ucsc.edu/hubs/GCA/009/914/755/GCA_009914755.4/liftOver/hg38ToHs1.over.chain.gz"
 
 # --- Path resolution ---
-# Everything (tools, data, output) goes into OUTPUT_DIR which defaults to CWD.
-# This makes Apptainer seamless: it auto-bind-mounts CWD, so all files land
-# where the user invoked the command.
+# The liftOver binary is baked into the container image alongside the script.
+# When running outside a container it is downloaded into OUTPUT_DIR on first run.
+# Large data files (chain file, Excel) always download at runtime into OUTPUT_DIR.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", os.getcwd())
 
-LIFTOVER_BIN = os.path.join(OUTPUT_DIR, "liftOver")
+# Prefer the liftOver binary next to the script (i.e. inside the container),
+# fall back to OUTPUT_DIR for bare-metal / local runs.
+_container_liftover = os.path.join(SCRIPT_DIR, "liftOver")
+LIFTOVER_BIN = _container_liftover if os.path.exists(_container_liftover) \
+    else os.path.join(OUTPUT_DIR, "liftOver")
+
+# Data files always land in OUTPUT_DIR (downloaded at runtime)
 CHAIN_FILE = os.path.join(OUTPUT_DIR, "hg38ToHs1.over.chain.gz")
 EXCEL_FILE = os.path.join(OUTPUT_DIR, "Supp_TableS1.xlsx")
 
@@ -233,7 +240,7 @@ def generate_audit_report(hg38_df):
         fh.write(f"## Unmapped:             {unmapped_count}\n")
         fh.write(f"## Chromosome changed:   {chrom_change_count}\n")
         fh.write(f"## Size changed:         {size_change_count}\n")
-        fh.write(f"## Mapping rate:         {mapped_count/total*100:.1f}%\n" if total else "")
+        fh.write(f"## Mapping rate:         {mapped_count/total*100:.1f}%\n" if total > 0 else "")
 
     print(f"Audit report written ({mapped_count} mapped, {unmapped_count} unmapped)")
 
@@ -246,7 +253,7 @@ def generate_audit_report(hg38_df):
     print(f"  Unmapped:             {unmapped_count}")
     print(f"  Chromosome changed:   {chrom_change_count}")
     print(f"  Size changed:         {size_change_count}")
-    if total:
+    if total > 0:
         print(f"  Mapping rate:         {mapped_count/total*100:.1f}%")
     print(f"{'='*50}")
 
@@ -261,10 +268,12 @@ def generate_audit_report(hg38_df):
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # 1. Download all resources to OUTPUT_DIR
+    # 1. Download data files to OUTPUT_DIR (large files, always at runtime)
     download_file(EXCEL_URL, EXCEL_FILE)
-    download_file(LIFTOVER_URL, LIFTOVER_BIN, make_executable=True)
     download_file(CHAIN_URL, CHAIN_FILE)
+
+    # liftOver binary is baked into the container; download only for local runs
+    download_file(LIFTOVER_URL, LIFTOVER_BIN, make_executable=True)
 
     # 2. Extract and format hg38 coordinates
     hg38_df = extract_coordinates()

@@ -22,9 +22,10 @@ The first data row looks like:
 
 ## How it works
 
-1. **Download** – The script fetches the Excel file, the UCSC
-   [`liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) binary, and the
-   `hg38ToHs1.over.chain.gz` chain file at runtime into the working directory.
+1. **Download** – The script downloads the Excel file and the
+   `hg38ToHs1.over.chain.gz` chain file at runtime.  The UCSC
+   [`liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) binary is bundled
+   inside the container image; for bare-metal runs it is downloaded automatically.
 2. **Extract** – Unique UCR coordinates (`Chr.`, `UCR start`, `UCR end`, `UCR ID`)
    are extracted from the spreadsheet. Chromosome names are normalised to `chrN`
    format and start positions are converted from 1-based to 0-based for BED.
@@ -51,8 +52,9 @@ Singularity) is available on most HPC clusters. Everything downloads at runtime:
 apptainer run docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
 ```
 
-That's it. All resources (liftOver binary, chain file, Excel data) and all output
-files land in your current working directory. No build step, no `pip install`,
+That's it. The `liftOver` binary is bundled in the image; only the data files
+(chain file, Excel spreadsheet) download at runtime. All output files land in
+your current working directory. No build step, no `pip install`,
 fully batteries-included.
 
 To write output to a specific directory:

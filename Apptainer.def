@@ -11,9 +11,13 @@ From: python:3.12-slim
 
 %post
     apt-get update && \
-        apt-get install -y --no-install-recommends ca-certificates && \
+        apt-get install -y --no-install-recommends ca-certificates wget && \
         rm -rf /var/lib/apt/lists/*
     pip install --no-cache-dir -r /app/requirements.txt
+    # Bake the liftOver binary into the image (small tool, ~3 MB)
+    wget --tries=3 --waitretry=5 -O /app/liftOver \
+        "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver" && \
+        chmod +x /app/liftOver
 
 %environment
     export OUTPUT_DIR="${OUTPUT_DIR:-$(pwd)}"
@@ -23,8 +27,8 @@ From: python:3.12-slim
 
 %help
     Lift over the 481 Ultraconserved Regions from hg38 to T2T-CHM13v2.0.
-    All resources (liftOver binary, chain file, Excel data) are downloaded
-    automatically on first run.
+    The liftOver binary is bundled in the image. Large data files (chain
+    file, Excel spreadsheet) are downloaded automatically on first run.
 
     One-liner (pulls image, runs pipeline, writes output to CWD):
         apptainer run docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
