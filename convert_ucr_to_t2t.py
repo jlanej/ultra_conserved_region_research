@@ -89,7 +89,7 @@ def normalize_chrom(x):
 def extract_coordinates():
     """Read Table S1, extract unique UCR coordinates, and write hg38 BED."""
     print(f"Reading {EXCEL_FILE}...")
-    df = pd.read_excel(EXCEL_FILE, skiprows=1)
+    df = pd.read_excel(EXCEL_FILE, skiprows=1, engine='openpyxl')
 
     # Table S1 may list the same UCR multiple times if it overlaps multiple genes
     ucr_df = df[['Chr.', 'UCR start (bp)', 'UCR end (bp)', 'UCR ID']].drop_duplicates()
