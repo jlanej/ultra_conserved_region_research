@@ -7,6 +7,7 @@ From: python:3.12-slim
 
 %files
     convert_ucr_to_t2t.py /app/convert_ucr_to_t2t.py
+    validate_liftover.py /app/validate_liftover.py
     requirements.txt /app/requirements.txt
 
 %post
@@ -14,10 +15,12 @@ From: python:3.12-slim
         apt-get install -y --no-install-recommends ca-certificates wget && \
         rm -rf /var/lib/apt/lists/*
     pip install --no-cache-dir -r /app/requirements.txt
-    # Bake the liftOver binary into the image (small tool, ~3 MB)
+    # Bake the UCSC binaries into the image (small tools, ~3 MB each)
     wget --tries=3 --waitretry=5 -O /app/liftOver \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver" && \
-        chmod +x /app/liftOver
+    wget --tries=3 --waitretry=5 -O /app/twoBitToFa \
+        "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitToFa" && \
+        chmod +x /app/liftOver /app/twoBitToFa
 
 %environment
     export OUTPUT_DIR="${OUTPUT_DIR:-$(pwd)}"
@@ -27,21 +30,31 @@ From: python:3.12-slim
 
 %help
     Lift over the 481 Ultraconserved Regions from hg38 to T2T-CHM13v2.0.
-    The liftOver binary is bundled in the image. Large data files (chain
-    file, Excel spreadsheet) are downloaded automatically on first run.
+    The liftOver and twoBitToFa binaries are bundled in the image. Large
+    data files (chain file, Excel spreadsheet, genomes) are downloaded
+    automatically on first run.
 
     One-liner (pulls image, runs pipeline, writes output to CWD):
-        apptainer run docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
+        apptainer run --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
 
     Or build a local SIF from this definition file:
         apptainer build ucr-liftover.sif Apptainer.def
         apptainer run ucr-liftover.sif
 
-    Output files:
+    Validate liftover with sequence alignment:
+        apptainer exec --bind "$(pwd):/output" ucr-liftover.sif python /app/validate_liftover.py
+
+    Output files (liftover):
         ucr_hg38.bed            - input UCR coordinates (hg38)
         ucr_t2t_chm13.bed       - mapped coordinates (T2T-CHM13)
         ucr_unmapped.bed        - unmapped regions with reasons
         ucr_liftover_audit.tsv  - full audit report for QC
+
+    Output files (validation):
+        ucr_sequences_hg38.fa       - extracted hg38 UCR sequences
+        ucr_sequences_t2t.fa        - extracted T2T-CHM13 UCR sequences
+        ucr_alignment_report.tsv    - per-region alignment statistics
+        ucr_alignment_details.txt   - visual alignments for divergent pairs
 
     Override output directory:
         OUTPUT_DIR=/scratch/proj apptainer run ucr-liftover.sif

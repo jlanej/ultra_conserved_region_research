@@ -12,15 +12,19 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY convert_ucr_to_t2t.py .
+COPY validate_liftover.py .
 
-# Bake the liftOver binary into the image (it is a small tool, ~3 MB).
-# Large data files (chain file, Excel) are downloaded at runtime.
+# Bake the UCSC binaries into the image (small tools, ~3 MB each).
+# Large data files (chain file, Excel, genomes) are downloaded at runtime.
 # Use retries for resilience against transient UCSC server issues.
 RUN wget --tries=3 --waitretry=5 -O liftOver \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver" && \
-    chmod +x liftOver
+    wget --tries=3 --waitretry=5 -O twoBitToFa \
+        "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitToFa" && \
+    chmod +x liftOver twoBitToFa
 
 ENV OUTPUT_DIR=/output
 VOLUME /output
 
-ENTRYPOINT ["python", "/app/convert_ucr_to_t2t.py"]
+ENTRYPOINT ["python"]
+CMD ["/app/convert_ucr_to_t2t.py"]
