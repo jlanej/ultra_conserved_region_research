@@ -9,6 +9,7 @@ From: python:3.12-slim
     convert_ucr_to_t2t.py /app/convert_ucr_to_t2t.py
     validate_liftover.py /app/validate_liftover.py
     requirements.txt /app/requirements.txt
+    resources /app/resources
 
 %post
     apt-get update && \
@@ -29,7 +30,7 @@ From: python:3.12-slim
     exec python /app/convert_ucr_to_t2t.py "$@"
 
 %help
-    Lift over the 481 Ultraconserved Regions from hg38 to T2T-CHM13v2.0.
+    Lift over human Ultraconserved Regions from hg38 to T2T-CHM13v2.0.
     The liftOver and twoBitToFa binaries are bundled in the image. Large
     data files (chain file, Excel spreadsheet, genomes) are downloaded
     automatically on first run.

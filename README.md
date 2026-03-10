@@ -1,19 +1,32 @@
 # Ultra Conserved Region Research
 
-Automated pipeline to lift over the 481 human **Ultraconserved Regions (UCRs)** from the GRCh38/hg38 reference assembly to the T2T-CHM13v2.0 (Hs1) telomere-to-telomere assembly, with optional per-base sequence validation.
+Automated pipeline to lift over human **Ultraconserved Regions (UCRs)** from the GRCh38/hg38 reference assembly to the T2T-CHM13v2.0 (Hs1) telomere-to-telomere assembly, with optional per-base sequence validation.
 
 ## Background
 
-Ultraconserved Regions are segments of the human genome (≥ 200 bp) that are 100 %
-identical between human, mouse, and rat. This project takes the canonical UCR
-catalogue from [Giacopuzzi *et al.* 2020 (PMC6857462)](https://pmc.ncbi.nlm.nih.gov/articles/PMC6857462/)
-and converts the coordinates to the first complete, gapless human genome assembly
+Ultraconserved elements (UCEs) were first identified by
+[Bejerano *et al.* 2004](https://doi.org/10.1126/science.1098119), who reported
+**481** genomic segments ≥ 200 bp that are 100 % identical between human, rat,
+and mouse.
+[Stephen *et al.* 2008](https://doi.org/10.1371/journal.pgen.1000030) later
+expanded this catalogue by comparing five placental mammals (human, dog, cow,
+mouse, and rat), identifying **2,189** sequences ≥ 200 bp and **13,736**
+sequences ≥ 100 bp conserved in at least three of the five species.
+
+This project lifts over the UCEs catalogued by
+[Giacopuzzi *et al.* 2020 (PMC6857462)](https://pmc.ncbi.nlm.nih.gov/articles/PMC6857462/)
+— which builds on the Stephen *et al.* 2008 set (UCR IDs run to 13,736) —
+from GRCh38/hg38 to the first complete, gapless human genome assembly
 ([T2T-CHM13v2.0](https://www.ncbi.nlm.nih.gov/assembly/GCA_009914755.4/)).
 
 ### Data source
 
-[Supplementary Table S1](https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx)
-provides the non-redundant list of UCRs together with overlapping gene annotations.
+Bundled `resources/Supp_TableS1.xlsx` (also available from
+[PMC6857462 Supplementary Table S1](https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx))
+lists genes that overlap UCEs, together with UCR coordinates.  Each gene–UCE
+pair occupies one row; a single UCE may appear multiple times (once per
+overlapping gene).  Rows without a chromosome assignment (genes on unplaced
+contigs) are excluded before coordinate extraction.
 The first data row looks like:
 
 | Gene ID | Associated gene name | Chr. | Gene start (bp) | Gene end (bp) | Gene length (bp) | Gene type | Number of UCRs in this gene | UCR ID | UCR start (bp) | UCR end (bp) | 10⁶×(Number of UCRs/Gene Length) |
@@ -24,10 +37,14 @@ The first data row looks like:
 
 ### Step 1 – Liftover (`convert_ucr_to_t2t.py`)
 
-1. **Download** – The script downloads the Excel file and the
-   `hg38ToHs1.over.chain.gz` chain file at runtime.  The UCSC
-   [`liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) binary is bundled
-   inside the container image; for bare-metal runs it is downloaded automatically.
+1. **Source** – The bundled `resources/Supp_TableS1.xlsx` (checked into the
+   repository) is used as the primary input.  If the file is not found (e.g. a
+   bare-metal run outside the repository tree), it is downloaded from
+   [PMC6857462](https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx).
+   The `hg38ToHs1.over.chain.gz` chain file is always downloaded at runtime.
+   The UCSC [`liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) binary is
+   bundled inside the container image; for bare-metal runs it is downloaded
+   automatically.
 2. **Extract** – Unique UCR coordinates (`Chr.`, `UCR start`, `UCR end`, `UCR ID`)
    are extracted from the spreadsheet. Chromosome names are normalised to `chrN`
    format and start positions are converted from 1-based to 0-based for BED.
@@ -95,11 +112,11 @@ execution.
 | [requests](https://docs.python-requests.org/) | HTTP client library |
 | [biopython](https://biopython.org/) | FASTA I/O (`Bio.SeqIO`) and Needleman–Wunsch pairwise alignment (`Bio.Align.PairwiseAligner`) |
 
-### Runtime data files (downloaded automatically)
+### Runtime data files
 
 | File | Size | Source | Used by |
 |---|---|---|---|
-| `Supp_TableS1.xlsx` | ~50 KB | [PMC6857462 Supp. Table S1](https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx) | `convert_ucr_to_t2t.py` |
+| `resources/Supp_TableS1.xlsx` | ~200 KB | Bundled in repository (fallback: [PMC6857462](https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx)) | `convert_ucr_to_t2t.py` |
 | `hg38ToHs1.over.chain.gz` | ~10 MB | [UCSC goldenPath](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHs1.over.chain.gz) | `convert_ucr_to_t2t.py` |
 | `hg38.2bit` | ~800 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.2bit) | `validate_liftover.py` |
 | `hs1.2bit` | ~780 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hs1/bigZips/hs1.2bit) | `validate_liftover.py` |
@@ -195,6 +212,10 @@ Results will appear in the `results/` directory.
 ├── requirements.txt               # Python dependencies
 ├── Dockerfile                     # Docker container definition
 ├── Apptainer.def                  # Apptainer/Singularity definition (HPC)
+├── resources/
+│   └── Supp_TableS1.xlsx          # Bundled UCR catalogue (Giacopuzzi et al. 2020)
+├── tests/
+│   └── test_convert_ucr_to_t2t.py # Integration tests
 ├── .github/workflows/
 │   ├── docker-build-publish.yml   # Build & push image to GHCR
 │   └── ucr-liftover.yml           # Run liftover and commit results
@@ -281,6 +302,13 @@ matches.
 
 ## References
 
+- Bejerano, G. *et al.* (2004). "Ultraconserved elements in the human genome."
+  *Science*, 304(5675), 1321–1325.
+  [doi:10.1126/science.1098119](https://doi.org/10.1126/science.1098119)
+- Stephen, S. *et al.* (2008). "Large-scale appearance of ultraconserved elements
+  in tetrapod genomes and slowdown of the molecular clock."
+  *PLOS Genetics*, 4(2), e1000030.
+  [doi:10.1371/journal.pgen.1000030](https://doi.org/10.1371/journal.pgen.1000030)
 - Giacopuzzi, E. *et al.* (2020). "Population-scale distribution and copy number
   variation of ultraconserved elements in the human genome."
   *Human Mutation*, 41(6), 1101–1111.
