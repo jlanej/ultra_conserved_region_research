@@ -231,8 +231,7 @@ def _write_report_tsv(path, results):
     with open(path, "w", newline="") as fh:
         fh.write("## UCR Sequence Alignment Report\n")
         fh.write(
-            f"## Generated: "
-            f"{datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+            f"## Generated: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
         )
         fh.write("## hg38 genome: hg38.2bit (GRCh38)\n")
         fh.write("## T2T genome: hs1.2bit (T2T-CHM13v2.0)\n")
@@ -264,8 +263,7 @@ def _write_details(path, results):
     with open(path, "w") as fh:
         fh.write("UCR Sequence Alignment Details\n")
         fh.write(
-            f"Generated: "
-            f"{datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+            f"Generated: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
         )
         fh.write(f"{'=' * 70}\n\n")
 
