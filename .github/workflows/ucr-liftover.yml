@@ -37,9 +37,7 @@ jobs:
           mkdir -p results
           docker run --rm \
             -v "${{ github.workspace }}/results:/output" \
-            --entrypoint /bin/sh \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            -c "python convert_ucr_to_t2t.py && cp ucr_hg38.bed ucr_t2t_chm13.bed ucr_unmapped.bed /output/"
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Commit and push results
         run: |

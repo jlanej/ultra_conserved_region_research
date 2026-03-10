@@ -20,4 +20,8 @@ RUN wget -q -O liftOver \
     wget -q -O hg38ToHs1.over.chain.gz \
         "https://hgdownload.soe.ucsc.edu/hubs/GCA/009/914/755/GCA_009914755.4/liftOver/hg38ToHs1.over.chain.gz"
 
+# Default output to /output so callers can bind-mount a host directory there
+ENV OUTPUT_DIR=/output
+VOLUME /output
+
 ENTRYPOINT ["python", "convert_ucr_to_t2t.py"]

@@ -5,21 +5,28 @@ import pandas as pd
 import stat
 
 # --- Configuration ---
-# Excel file URL (Table S3 or S1)
-EXCEL_URL = "https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS3.xlsx"
-EXCEL_FILE = "Supp_TableS3.xlsx"
+# Excel file URL (Supplementary Table S1 from PMC6857462)
+# Table S1 provides the clean, non-redundant list of 481 UCRs with gene overlap info
+EXCEL_URL = "https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx"
 
-# UCSC LiftOver and Chain File
+# UCSC LiftOver and Chain File URLs (used only when not already present)
 LIFTOVER_URL = "http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver"
 CHAIN_URL = "https://hgdownload.soe.ucsc.edu/hubs/GCA/009/914/755/GCA_009914755.4/liftOver/hg38ToHs1.over.chain.gz"
 
-LIFTOVER_BIN = "./liftOver"
-CHAIN_FILE = "hg38ToHs1.over.chain.gz"
+# --- Path resolution ---
+# Tools are baked into the container image at /app; when running locally they are
+# downloaded to the current directory.  OUTPUT_DIR controls where results land
+# (defaults to $PWD so Apptainer bind-mounts just work).
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", os.getcwd())
 
-# Input/Output BED files
-HG38_BED = "ucr_hg38.bed"
-T2T_BED = "ucr_t2t_chm13.bed"
-UNMAPPED_BED = "ucr_unmapped.bed"
+LIFTOVER_BIN = os.path.join(SCRIPT_DIR, "liftOver")
+CHAIN_FILE = os.path.join(SCRIPT_DIR, "hg38ToHs1.over.chain.gz")
+EXCEL_FILE = os.path.join(OUTPUT_DIR, "Supp_TableS1.xlsx")
+
+HG38_BED = os.path.join(OUTPUT_DIR, "ucr_hg38.bed")
+T2T_BED = os.path.join(OUTPUT_DIR, "ucr_t2t_chm13.bed")
+UNMAPPED_BED = os.path.join(OUTPUT_DIR, "ucr_unmapped.bed")
 
 
 def download_file(url, filename, make_executable=False):
@@ -35,15 +42,15 @@ def download_file(url, filename, make_executable=False):
 
 def extract_coordinates():
     print(f"Reading {EXCEL_FILE}...")
-    # Read the Excel file, skipping the first row (the title "SUPPLEMENTARY TABLE S3...")
+    # Read the Excel file, skipping the first row (the title "SUPPLEMENTARY TABLE S1...")
     df = pd.read_excel(EXCEL_FILE, skiprows=1)
 
-    # Extract unique UCRs (since Table S3 repeats UCRs for each polymorphism)
-    # We need: Chr. number, UCR start (bp), UCR end (bp), UCR ID
-    ucr_df = df[['Chr. number', 'UCR start (bp)', 'UCR end (bp)', 'UCR ID']].drop_duplicates()
+    # Extract unique UCRs by their coordinates and ID
+    # Table S1 may list the same UCR multiple times if it overlaps multiple genes
+    ucr_df = df[['Chr.', 'UCR start (bp)', 'UCR end (bp)', 'UCR ID']].drop_duplicates()
 
     # Format chromosomes properly (e.g., '1' -> 'chr1')
-    ucr_df['Chr. number'] = ucr_df['Chr. number'].apply(
+    ucr_df['Chr.'] = ucr_df['Chr.'].apply(
         lambda x: str(x) if str(x).startswith('chr') else f"chr{x}"
     )
 
@@ -52,7 +59,7 @@ def extract_coordinates():
     ucr_df['BED_start'] = ucr_df['UCR start (bp)'].astype(int) - 1
     ucr_df['BED_end'] = ucr_df['UCR end (bp)'].astype(int)
 
-    bed_df = ucr_df[['Chr. number', 'BED_start', 'BED_end', 'UCR ID']]
+    bed_df = ucr_df[['Chr.', 'BED_start', 'BED_end', 'UCR ID']]
 
     print(f"Extracted {len(bed_df)} unique UCR regions.")
 
@@ -82,6 +89,8 @@ def run_liftover():
 
 
 if __name__ == "__main__":
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
     # 1. Download necessary assets
     download_file(EXCEL_URL, EXCEL_FILE)
     download_file(LIFTOVER_URL, LIFTOVER_BIN, make_executable=True)
