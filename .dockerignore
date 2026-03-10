@@ -1,0 +1,9 @@
+.git
+.github
+*.bed
+*.xlsx
+*.chain.gz
+__pycache__
+*.pyc
+.venv
+README.md

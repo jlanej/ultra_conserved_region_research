@@ -1,0 +1,60 @@
+name: UCR Liftover
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Docker Build & Publish"]
+    types: [completed]
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  liftover:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run UCR liftover
+        run: |
+          mkdir -p results
+          docker run --rm \
+            -v "${{ github.workspace }}/results:/output" \
+            --entrypoint /bin/sh \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            -c "python convert_ucr_to_t2t.py && cp ucr_hg38.bed ucr_t2t_chm13.bed ucr_unmapped.bed /output/"
+
+      - name: Commit and push results
+        run: |
+          cd "${{ github.workspace }}"
+          mkdir -p data
+          cp results/ucr_hg38.bed data/ 2>/dev/null || true
+          cp results/ucr_t2t_chm13.bed data/ 2>/dev/null || true
+          cp results/ucr_unmapped.bed data/ 2>/dev/null || true
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update UCR liftover results (hg38 → T2T-CHM13) [skip ci]"
+            git push
+          fi
