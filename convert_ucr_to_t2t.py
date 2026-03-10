@@ -61,6 +61,31 @@ def download_file(url, filename, make_executable=False):
         print(f"{filename} already exists, skipping download.")
 
 
+def normalize_chrom(x):
+    """Normalise a chromosome name to the UCSC 'chrN' convention.
+
+    Handles:
+    * Plain numbers/letters: 1 → chr1, X → chrX
+    * Already-prefixed (any case): chr1 → chr1, CHR1 → chr1, chrx → chrX
+    * Mitochondrial: MT → chrM, chrMT → chrM
+    * Strips surrounding whitespace
+    * NaN / None → returned unchanged (dropped by drop_duplicates / validation)
+    """
+    if pd.isna(x):
+        return x
+    s = str(x).strip()
+    # Strip any existing 'chr' prefix, case-insensitively, to re-add it cleanly
+    if s.lower().startswith('chr'):
+        s = s[3:]
+    # Normalise mitochondrial chromosome to UCSC convention (M, not MT)
+    if s.upper() == 'MT':
+        s = 'M'
+    # Uppercase non-numeric identifiers so X, Y, M are consistently capitalised
+    if not s.isdigit():
+        s = s.upper()
+    return f'chr{s}'
+
+
 def extract_coordinates():
     """Read Table S1, extract unique UCR coordinates, and write hg38 BED."""
     print(f"Reading {EXCEL_FILE}...")
@@ -69,10 +94,8 @@ def extract_coordinates():
     # Table S1 may list the same UCR multiple times if it overlaps multiple genes
     ucr_df = df[['Chr.', 'UCR start (bp)', 'UCR end (bp)', 'UCR ID']].drop_duplicates()
 
-    # Normalise chromosome names (e.g. '1' -> 'chr1')
-    ucr_df['Chr.'] = ucr_df['Chr.'].apply(
-        lambda x: str(x) if str(x).startswith('chr') else f"chr{x}"
-    )
+    # Normalise chromosome names to UCSC 'chrN' convention
+    ucr_df['Chr.'] = ucr_df['Chr.'].apply(normalize_chrom)
 
     # BED format: 0-based start, 1-based end
     ucr_df['BED_start'] = ucr_df['UCR start (bp)'].astype(int) - 1

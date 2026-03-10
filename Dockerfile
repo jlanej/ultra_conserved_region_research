@@ -23,4 +23,4 @@ RUN wget --tries=3 --waitretry=5 -O liftOver \
 ENV OUTPUT_DIR=/output
 VOLUME /output
 
-ENTRYPOINT ["python", "convert_ucr_to_t2t.py"]
+ENTRYPOINT ["python", "/app/convert_ucr_to_t2t.py"]
