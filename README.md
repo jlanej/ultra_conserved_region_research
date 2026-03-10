@@ -49,18 +49,19 @@ No Docker daemon required. [Apptainer](https://apptainer.org/) (formerly
 Singularity) is available on most HPC clusters. Everything downloads at runtime:
 
 ```bash
-apptainer run docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
+apptainer run --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
 ```
 
-That's it. The `liftOver` binary is bundled in the image; only the data files
-(chain file, Excel spreadsheet) download at runtime. All output files land in
-your current working directory. No build step, no `pip install`,
-fully batteries-included.
+That's it. The `--bind` flag maps your current directory to the container's
+`/output` so results are written to the host filesystem. The `liftOver` binary
+is bundled in the image; only the data files (chain file, Excel spreadsheet)
+download at runtime. All output files land in your current working directory.
+No build step, no `pip install`, fully batteries-included.
 
 To write output to a specific directory:
 
 ```bash
-OUTPUT_DIR=/scratch/my_project apptainer run docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
+apptainer run --bind /scratch/my_project:/output docker://ghcr.io/jlanej/ultra_conserved_region_research:latest
 ```
 
 To build a reusable SIF image (useful on air-gapped nodes or for repeated runs):
