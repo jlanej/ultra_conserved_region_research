@@ -113,6 +113,19 @@ downloaded automatically on first execution.
 | `k24/k36/k50/k100/k150/k250.Unique.Mappability.bb` | large track files (downloaded at runtime) | [UCSC gbdb hs1/hoffmanMappability](https://hgdownload.soe.ucsc.edu/gbdb/hs1/hoffmanMappability/) | `compute_unique_fraction.py` |
 | `hs1.chrom.sizes` | small text file | [UCSC bigZips](https://hgdownload.soe.ucsc.edu/goldenPath/hs1/bigZips/hs1.chrom.sizes) | `compute_unique_fraction.py` |
 
+What the `.bb` files represent in this project:
+
+- `hg38.ultraConserved.bb` is a UCSC **bigBed** file for the hg38
+  `compGeno/unusualcons/ultras` dataset: genomic intervals for ultraconserved
+  regions (classically, 200+ bp regions with complete human/rat/mouse
+  conservation in the original UCE definition). The pipeline converts this
+  track to BED4 and then performs liftover.
+- `k*.Unique.Mappability.bb` files are UCSC **bigBed** tracks from
+  `hs1/hoffmanMappability` describing unique mappability at each k-mer size.
+  Depending on track schema, intervals may be binary or score-bearing; when
+  scores are present, this project reports strict uniqueness by retaining only
+  intervals at the maximum score for that track.
+
 ### Container platforms
 
 | Platform | Definition file | Notes |
@@ -190,6 +203,18 @@ The module writes:
 - `hs1.unique_fraction_by_kmer.tsv` (per-k strict unique fraction table)
 - `hs1.unique_fraction_comparison.tsv` (per-k deltas vs previous k)
 - `hs1.unique_fraction_summary.txt` (concise scientific summary text)
+
+`hs1.unique_fraction_by_kmer.tsv` columns:
+
+| Column | Meaning |
+|---|---|
+| `assembly` | Assembly label for the mappability track (currently `hs1`, i.e. T2T-CHM13v2.0). |
+| `kmer` | K-mer size used for the corresponding UCSC mappability track (`k24`, `k36`, `k50`, `k100`, `k150`, `k250`). |
+| `unique_bp` | Number of base pairs in intervals counted as unique. For scored tracks, this is the union of intervals at the **maximum** score only (strict unique); for binary tracks, this is the union of all intervals. |
+| `genome_bp` | Denominator in base pairs from `hs1.chrom.sizes` after applying `--primary-only` and/or `--exclude-chrM` filters. |
+| `fraction_unique` | `unique_bp / genome_bp` as a fraction in `[0, 1]`. |
+| `percent_unique` | `fraction_unique * 100`. |
+| `strict_unique_filter_applied` | `TRUE` when the track had mixed scores and non-maximal intervals were excluded; `FALSE` when no score-based filtering was needed. |
 
 It also prints `bigBedInfo` metadata per track so you can verify whether the
 track behaves as binary intervals or contains scored values. If scored values
