@@ -34,6 +34,27 @@ def test_genome_size_bp_filters(tmp_path):
     assert cuf.genome_size_bp(str(chrom_sizes), primary_only=True, exclude_chrm=True) == 300
 
 
+def test_genome_size_by_chrom_filters(tmp_path):
+    chrom_sizes = tmp_path / "hg38.chrom.sizes"
+    chrom_sizes.write_text(
+        "chr1\t100\n"
+        "chr2\t200\n"
+        "chrM\t10\n"
+        "chrUn_KI270521v1\t50\n"
+    )
+    assert cuf.genome_size_by_chrom(str(chrom_sizes), primary_only=True) == {
+        "chr1": 100,
+        "chr2": 200,
+        "chrM": 10,
+    }
+    assert cuf.genome_size_by_chrom(
+        str(chrom_sizes), primary_only=True, exclude_chrm=True
+    ) == {
+        "chr1": 100,
+        "chr2": 200,
+    }
+
+
 def test_unique_covered_bp_binary_intervals(tmp_path):
     bed = tmp_path / "k24.unique.bed"
     bed.write_text(
@@ -45,6 +66,18 @@ def test_unique_covered_bp_binary_intervals(tmp_path):
     # Union coverage for chr1 is [0,30): 30 bp
     covered, strict_filter = cuf.unique_covered_bp(str(bed))
     assert covered == 30
+    assert strict_filter is False
+
+
+def test_unique_covered_bp_by_chrom_binary_intervals(tmp_path):
+    bed = tmp_path / "k24.unique.bed"
+    bed.write_text(
+        "chr1\t0\t10\n"
+        "chr1\t5\t20\n"
+        "chr2\t100\t110\n"
+    )
+    covered_by_chrom, strict_filter = cuf.unique_covered_bp_by_chrom(str(bed))
+    assert covered_by_chrom == {"chr1": 20, "chr2": 10}
     assert strict_filter is False
 
 

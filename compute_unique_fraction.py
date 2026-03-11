@@ -31,6 +31,7 @@ BIGBEDINFO_BIN = (
 
 CHROM_SIZES_FILE = os.path.join(OUTPUT_DIR, f"{ASSEMBLY}.chrom.sizes")
 SUMMARY_TSV = os.path.join(OUTPUT_DIR, f"{ASSEMBLY}.unique_fraction_by_kmer.tsv")
+CHROM_SUMMARY_TSV = os.path.join(OUTPUT_DIR, f"{ASSEMBLY}.unique_fraction_by_kmer_by_chrom.tsv")
 COMPARISON_TSV = os.path.join(OUTPUT_DIR, f"{ASSEMBLY}.unique_fraction_comparison.tsv")
 SUMMARY_TXT = os.path.join(OUTPUT_DIR, f"{ASSEMBLY}.unique_fraction_summary.txt")
 
@@ -87,7 +88,11 @@ def chrom_allowed(chrom, primary_only, exclude_chrm):
 
 
 def genome_size_bp(chrom_sizes_file, primary_only=False, exclude_chrm=False):
-    total = 0
+    return sum(genome_size_by_chrom(chrom_sizes_file, primary_only=primary_only, exclude_chrm=exclude_chrm).values())
+
+
+def genome_size_by_chrom(chrom_sizes_file, primary_only=False, exclude_chrm=False):
+    by_chrom = {}
     with open(chrom_sizes_file) as fh:
         for line in fh:
             line = line.strip()
@@ -95,11 +100,20 @@ def genome_size_bp(chrom_sizes_file, primary_only=False, exclude_chrm=False):
                 continue
             chrom, size = line.split("\t")[:2]
             if chrom_allowed(chrom, primary_only, exclude_chrm):
-                total += int(size)
-    return total
+                by_chrom[chrom] = int(size)
+    return by_chrom
 
 
 def unique_covered_bp(bed_file, primary_only=False, exclude_chrm=False):
+    covered_by_chrom, strict_filter = unique_covered_bp_by_chrom(
+        bed_file,
+        primary_only=primary_only,
+        exclude_chrm=exclude_chrm,
+    )
+    return sum(covered_by_chrom.values()), strict_filter
+
+
+def unique_covered_bp_by_chrom(bed_file, primary_only=False, exclude_chrm=False):
     records = []
     numeric_scores = []
     with open(bed_file) as fh:
@@ -133,7 +147,7 @@ def unique_covered_bp(bed_file, primary_only=False, exclude_chrm=False):
             records.append((chrom, start, end, score))
 
     if not records:
-        return 0, False
+        return {}, False
 
     filter_non_maximal_scores = False
     unique_score_threshold = None
@@ -150,12 +164,13 @@ def unique_covered_bp(bed_file, primary_only=False, exclude_chrm=False):
                 continue
         by_chrom.setdefault(chrom, []).append((start, end))
 
-    covered = 0
+    covered_by_chrom = {}
     for chrom in by_chrom:
         intervals = sorted(by_chrom[chrom])
         if not intervals:
             continue
         cur_start, cur_end = intervals[0]
+        covered = 0
         for start, end in intervals[1:]:
             if start <= cur_end:
                 if end > cur_end:
@@ -164,7 +179,8 @@ def unique_covered_bp(bed_file, primary_only=False, exclude_chrm=False):
                 covered += cur_end - cur_start
                 cur_start, cur_end = start, end
         covered += cur_end - cur_start
-    return covered, filter_non_maximal_scores
+        covered_by_chrom[chrom] = covered
+    return covered_by_chrom, filter_non_maximal_scores
 
 
 def bigbed_to_bed(bb_file, bed_file):
@@ -214,7 +230,7 @@ def build_comparison_rows(rows):
     return comparisons
 
 
-def write_summary(rows):
+def write_summary(rows, chrom_rows=None):
     with open(SUMMARY_TSV, "w", newline="") as fh:
         writer = csv.writer(fh, delimiter="\t")
         writer.writerow([
@@ -254,6 +270,31 @@ def write_summary(rows):
                 row["delta_percent_from_previous_k"],
             ])
 
+    if chrom_rows:
+        with open(CHROM_SUMMARY_TSV, "w", newline="") as fh:
+            writer = csv.writer(fh, delimiter="\t")
+            writer.writerow([
+                "assembly",
+                "kmer",
+                "chromosome",
+                "unique_bp",
+                "genome_bp",
+                "fraction_unique",
+                "percent_unique",
+                "strict_unique_filter_applied",
+            ])
+            for row in chrom_rows:
+                writer.writerow([
+                    row["assembly"],
+                    row["kmer"],
+                    row["chromosome"],
+                    row["unique_bp"],
+                    row["genome_bp"],
+                    row["fraction_unique"],
+                    row["percent_unique"],
+                    row["strict_unique_filter_applied"],
+                ])
+
     with open(SUMMARY_TXT, "w") as fh:
         fh.write(f"Assembly: {ASSEMBLY}\n")
         fh.write("Metric: strict unique mappability fraction by k-mer\n")
@@ -290,6 +331,12 @@ def main(argv=None):
         raise ValueError("Genome size is zero after chromosome filters.")
 
     rows = []
+    chrom_rows = []
+    genome_bp_by_chrom = genome_size_by_chrom(
+        CHROM_SIZES_FILE,
+        primary_only=primary_only,
+        exclude_chrm=exclude_chrm,
+    )
     for k in kmers:
         bb_file = bb_file_path(k)
         bed_file = bed_file_path(k)
@@ -299,11 +346,12 @@ def main(argv=None):
         print("Converting bigBed to BED...")
         bigbed_to_bed(bb_file, bed_file)
 
-        unique_bp, strict_filter = unique_covered_bp(
+        unique_bp_by_chrom, strict_filter = unique_covered_bp_by_chrom(
             bed_file,
             primary_only=primary_only,
             exclude_chrm=exclude_chrm,
         )
+        unique_bp = sum(unique_bp_by_chrom.values())
         fraction = unique_bp / genome_bp
         percent = 100.0 * fraction
         row = {
@@ -316,13 +364,28 @@ def main(argv=None):
             "strict_unique_filter_applied": strict_filter,
         }
         rows.append(row)
+        for chrom, chrom_genome_bp in genome_bp_by_chrom.items():
+            chrom_unique_bp = unique_bp_by_chrom.get(chrom, 0)
+            chrom_fraction = chrom_unique_bp / chrom_genome_bp if chrom_genome_bp else 0.0
+            chrom_rows.append({
+                "assembly": ASSEMBLY,
+                "kmer": k,
+                "chromosome": chrom,
+                "unique_bp": chrom_unique_bp,
+                "genome_bp": chrom_genome_bp,
+                "fraction_unique": chrom_fraction,
+                "percent_unique": 100.0 * chrom_fraction,
+                "strict_unique_filter_applied": strict_filter,
+            })
         print(
             f"k={k}\tunique_bp={unique_bp}\tgenome_bp={genome_bp}"
             f"\tfraction_unique={fraction}\tpercent_unique={percent}"
         )
 
-    write_summary(rows)
+    write_summary(rows, chrom_rows=chrom_rows)
     print(f"Saved k-mer summary to {SUMMARY_TSV}")
+    if chrom_rows:
+        print(f"Saved per-chromosome k-mer summary to {CHROM_SUMMARY_TSV}")
     print(f"Saved comparison table to {COMPARISON_TSV}")
     print(f"Saved text summary to {SUMMARY_TXT}")
 

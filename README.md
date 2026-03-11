@@ -201,6 +201,7 @@ apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_r
 The module writes:
 
 - `hs1.unique_fraction_by_kmer.tsv` (per-k strict unique fraction table)
+- `hs1.unique_fraction_by_kmer_by_chrom.tsv` (per-k, per-chromosome strict unique fraction table)
 - `hs1.unique_fraction_comparison.tsv` (per-k deltas vs previous k)
 - `hs1.unique_fraction_summary.txt` (concise scientific summary text)
 
@@ -215,6 +216,19 @@ The module writes:
 | `fraction_unique` | `unique_bp / genome_bp` as a fraction in `[0, 1]`. |
 | `percent_unique` | `fraction_unique * 100`. |
 | `strict_unique_filter_applied` | `TRUE` when the track had mixed scores and non-maximal intervals were excluded; `FALSE` when no score-based filtering was needed. |
+
+`hs1.unique_fraction_by_kmer_by_chrom.tsv` columns:
+
+| Column | Meaning |
+|---|---|
+| `assembly` | Assembly label for the mappability track (`hs1`). |
+| `kmer` | K-mer size used for the track. |
+| `chromosome` | Chromosome name from `hs1.chrom.sizes` after any filters. |
+| `unique_bp` | Unique covered bp on that chromosome for the given k-mer. |
+| `genome_bp` | Chromosome size bp for that chromosome (denominator component). |
+| `fraction_unique` | `unique_bp / genome_bp` for that chromosome. |
+| `percent_unique` | `fraction_unique * 100` for that chromosome. |
+| `strict_unique_filter_applied` | Same strict-score filtering flag used for the corresponding k-mer track. |
 
 It also prints `bigBedInfo` metadata per track so you can verify whether the
 track behaves as binary intervals or contains scored values. If scored values
