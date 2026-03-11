@@ -26,6 +26,7 @@ From: python:3.12-slim
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitToFa" && \
     wget --tries=3 --waitretry=5 -O /app/bigBedInfo \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedInfo" && \
+    # Keep bigBedSummary available for UCSC mappability track sanity checks.
     wget --tries=3 --waitretry=5 -O /app/bigBedSummary \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedSummary" && \
         chmod +x /app/liftOver /app/bigBedToBed /app/twoBitToFa /app/bigBedInfo /app/bigBedSummary

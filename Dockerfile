@@ -28,6 +28,7 @@ RUN wget --tries=3 --waitretry=5 -O liftOver \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitToFa" && \
     wget --tries=3 --waitretry=5 -O bigBedInfo \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedInfo" && \
+    # Keep bigBedSummary available for UCSC mappability track sanity checks.
     wget --tries=3 --waitretry=5 -O bigBedSummary \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedSummary" && \
     chmod +x liftOver bigBedToBed twoBitToFa bigBedInfo bigBedSummary

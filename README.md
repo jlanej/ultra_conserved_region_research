@@ -110,7 +110,7 @@ downloaded automatically on first execution.
 | `hg38ToHs1.over.chain.gz` | ~10 MB | [UCSC goldenPath](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHs1.over.chain.gz) | `convert_ucr_to_t2t.py` |
 | `hg38.2bit` | ~800 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.2bit) | `validate_liftover.py` |
 | `hs1.2bit` | ~780 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hs1/bigZips/hs1.2bit) | `validate_liftover.py` |
-| `k24.Unique.Mappability.bb` | ~GBDB track file | [UCSC gbdb](https://hgdownload.soe.ucsc.edu/gbdb/hg38/hoffmanMappability/k24.Unique.Mappability.bb) | `compute_unique_fraction.py` |
+| `k24.Unique.Mappability.bb` | large track file (downloaded at runtime) | [UCSC gbdb](https://hgdownload.soe.ucsc.edu/gbdb/hg38/hoffmanMappability/k24.Unique.Mappability.bb) | `compute_unique_fraction.py` |
 | `hg38.chrom.sizes` | small text file | [UCSC bigZips](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.chrom.sizes) | `compute_unique_fraction.py` |
 
 ### Container platforms

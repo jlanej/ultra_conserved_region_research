@@ -45,7 +45,7 @@ def test_unique_covered_bp_binary_intervals(tmp_path):
     assert cuf.unique_covered_bp(str(bed)) == 30
 
 
-def test_unique_covered_bp_keeps_only_truly_unique_scores(tmp_path):
+def test_unique_covered_bp_filters_non_maximal_scores(tmp_path):
     bed = tmp_path / "k24.unique.bed"
     bed.write_text(
         # score in BED5; interpreted as 0..1000 UCSC score and normalized

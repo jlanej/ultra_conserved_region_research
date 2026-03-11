@@ -37,6 +37,7 @@ HG38_CHROM_SIZES_FILE = os.path.join(OUTPUT_DIR, "hg38.chrom.sizes")
 K24_UNIQUE_BED_FILE = os.path.join(OUTPUT_DIR, "k24.unique.bed")
 SUMMARY_TSV = os.path.join(OUTPUT_DIR, "k24.unique_fraction.tsv")
 
+# "Primary" here includes chrM by default; --exclude-chrM removes it.
 PRIMARY_RE = re.compile(r"^chr([1-9]|1[0-9]|2[0-2]|X|Y|M)$")
 
 
@@ -114,17 +115,17 @@ def unique_covered_bp(bed_file, primary_only=False, exclude_chrm=False):
     if not records:
         return 0
 
-    keep_only_max_scored = False
+    filter_non_maximal_scores = False
     unique_score_threshold = None
     if numeric_scores:
         min_score = min(numeric_scores)
         max_score = max(numeric_scores)
-        keep_only_max_scored = max_score > min_score
+        filter_non_maximal_scores = max_score > min_score
         unique_score_threshold = max_score
 
     by_chrom = {}
     for chrom, start, end, score in records:
-        if keep_only_max_scored:
+        if filter_non_maximal_scores:
             if score is None or score < unique_score_threshold:
                 continue
         by_chrom.setdefault(chrom, []).append((start, end))
