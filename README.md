@@ -93,7 +93,7 @@ execution.
 
 | Package | Purpose |
 |---|---|
-| [pandas](https://pandas.pydata.org/) | Tabular parsing/filtering of UCSC BED output |
+| [pandas](https://pandas.pydata.org/) | BED file parsing, deduplication, and type conversion |
 | [requests](https://docs.python-requests.org/) | HTTP client library |
 | [biopython](https://biopython.org/) | FASTA I/O (`Bio.SeqIO`) and Needleman–Wunsch pairwise alignment (`Bio.Align.PairwiseAligner`) |
 

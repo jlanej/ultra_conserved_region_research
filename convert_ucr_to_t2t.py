@@ -119,7 +119,9 @@ def extract_coordinates():
     if df.empty:
         raise ValueError(f"No regions found in {ULTRAS_RAW_BED}")
     if df.shape[1] < 4:
-        df[3] = [f"ultra_{i}" for i in range(1, len(df) + 1)]
+        # Some BED3 exports omit column 4 (name); generate stable synthetic IDs
+        # so downstream liftover/audit logic can still key records by region.
+        df[3] = [f"uc.{i}" for i in range(1, len(df) + 1)]
 
     ucr_df = df[[0, 1, 2, 3]].drop_duplicates()
     ucr_df.columns = ['Chr.', 'BED_start', 'BED_end', 'UCR ID']

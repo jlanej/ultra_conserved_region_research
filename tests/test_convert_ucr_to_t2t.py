@@ -31,7 +31,7 @@ import convert_ucr_to_t2t as uct  # noqa: E402  (import after sys.path tweak)
 RESOURCES_DIR = os.path.join(REPO_ROOT, "resources")
 BUNDLED_ULTRAS_BB = os.path.join(RESOURCES_DIR, "hg38.ultraConserved.bb")
 
-MIN_UCR_COUNT = 3
+MIN_UCR_COUNT_FOR_TESTS = 3
 
 
 # ===========================================================================
@@ -140,7 +140,7 @@ class TestExtractCoordinates:
         bed_df = uct.extract_coordinates()
 
         assert os.path.exists(uct.HG38_BED), "BED file was not written."
-        assert len(bed_df) >= MIN_UCR_COUNT
+        assert len(bed_df) >= MIN_UCR_COUNT_FOR_TESTS
 
     def test_no_nan_chromosomes_in_bed(self, tmp_path, monkeypatch):
         self._mock_bigbed_to_bed(monkeypatch, tmp_path)
@@ -484,7 +484,7 @@ class TestFullPipelineSmoke:
             f"Expected 0 unmapped regions with passthrough stub, got {len(unmapped)}: "
             f"{unmapped[:3]}"
         )
-        assert len(rows) >= MIN_UCR_COUNT
+        assert len(rows) >= MIN_UCR_COUNT_FOR_TESTS
 
 
 # ===========================================================================
