@@ -17,13 +17,15 @@ COPY validate_liftover.py .
 COPY resources/ ./resources/
 
 # Bake the UCSC binaries into the image (small tools, ~3 MB each).
-# Large data files (chain file, Excel, genomes) are downloaded at runtime.
+# Large data files (ultras.bigBed, chain file, genomes) are downloaded at runtime.
 # Use retries for resilience against transient UCSC server issues.
 RUN wget --tries=3 --waitretry=5 -O liftOver \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver" && \
+    wget --tries=3 --waitretry=5 -O bigBedToBed \
+        "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedToBed" && \
     wget --tries=3 --waitretry=5 -O twoBitToFa \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitToFa" && \
-    chmod +x liftOver twoBitToFa
+    chmod +x liftOver bigBedToBed twoBitToFa
 
 ENV OUTPUT_DIR=/output
 VOLUME /output

@@ -9,13 +9,11 @@ import pandas as pd
 import stat
 
 # --- Configuration ---
-# Excel file URL (Supplementary Table S1 from PMC6857462)
-# Table S1 lists genes overlapping UCEs from the Stephen et al. 2008 catalogue
-# (UCR IDs run to 13,736 for the ≥100 bp set; 2,189 for the ≥200 bp set).
-# Rows without a chromosome assignment are excluded during coordinate extraction.
-EXCEL_URL = "https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx"
+# UCSC "ultras" bigBed and utility URLs
+ULTRAS_BB_URL = "https://hgdownload.soe.ucsc.edu/gbdb/hg38/bbi/ultras.bb"
+BIGBEDTOBED_URL = "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedToBed"
 
-# UCSC LiftOver binary and chain file URLs
+# UCSC liftOver binary and chain file URLs
 LIFTOVER_URL = "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver"
 CHAIN_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHs1.over.chain.gz"
 
@@ -34,12 +32,20 @@ LIFTOVER_BIN = _container_liftover if os.path.exists(_container_liftover) \
 
 # Data files always land in OUTPUT_DIR (downloaded at runtime)
 CHAIN_FILE = os.path.join(OUTPUT_DIR, "hg38ToHs1.over.chain.gz")
+ULTRAS_RAW_BED = os.path.join(OUTPUT_DIR, "ultras_hg38_raw.bed")
 
-# Prefer the bundled resources file (checked into the repo) if available;
-# fall back to downloading into OUTPUT_DIR when running outside the repo.
-_bundled_excel = os.path.normpath(os.path.join(SCRIPT_DIR, "resources", "Supp_TableS1.xlsx"))
-EXCEL_FILE = _bundled_excel if os.path.exists(_bundled_excel) \
-    else os.path.join(OUTPUT_DIR, "Supp_TableS1.xlsx")
+# Prefer the bundled UCSC ultras bigBed file (checked into the repo) if
+# available; fall back to downloading into OUTPUT_DIR when running outside
+# the repo.
+_bundled_ultras_bb = os.path.normpath(os.path.join(SCRIPT_DIR, "resources", "hg38.ultraConserved.bb"))
+ULTRAS_BB_FILE = _bundled_ultras_bb if os.path.exists(_bundled_ultras_bb) \
+    else os.path.join(OUTPUT_DIR, "hg38.ultraConserved.bb")
+
+# bigBedToBed binary is baked into the container image when available; for
+# local runs, it is downloaded into OUTPUT_DIR on first run.
+_container_bigbedtobed = os.path.join(SCRIPT_DIR, "bigBedToBed")
+BIGBEDTOBED_BIN = _container_bigbedtobed if os.path.exists(_container_bigbedtobed) \
+    else os.path.join(OUTPUT_DIR, "bigBedToBed")
 
 HG38_BED = os.path.join(OUTPUT_DIR, "ucr_hg38.bed")
 T2T_BED = os.path.join(OUTPUT_DIR, "ucr_t2t_chm13.bed")
@@ -94,31 +100,38 @@ def normalize_chrom(x):
 
 
 def extract_coordinates():
-    """Read Table S1, extract unique UCR coordinates, and write hg38 BED."""
-    print(f"Reading {EXCEL_FILE}...")
-    df = pd.read_excel(EXCEL_FILE, skiprows=1, engine='openpyxl')
+    """Convert bundled UCSC ultras bigBed to BED4 and write hg38 BED."""
+    print(f"Converting UCSC ultras bigBed → BED: {ULTRAS_BB_FILE}")
+    result = subprocess.run(
+        [BIGBEDTOBED_BIN, ULTRAS_BB_FILE, ULTRAS_RAW_BED],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"bigBedToBed stderr:\n{result.stderr}", file=sys.stderr)
+        result.check_returncode()
+    if result.stderr:
+        print(f"bigBedToBed warnings:\n{result.stderr}")
 
-    # Table S1 may list the same UCR multiple times if it overlaps multiple genes
-    ucr_df = df[['Chr.', 'UCR start (bp)', 'UCR end (bp)', 'UCR ID']].drop_duplicates()
+    # bigBedToBed output is BED3+ (name should be column 4 for ultras).
+    # Keep only BED4 for downstream liftover/audit.
+    df = pd.read_csv(ULTRAS_RAW_BED, sep='\t', header=None, comment='#')
+    if df.empty:
+        raise ValueError(f"No regions found in {ULTRAS_RAW_BED}")
+    if df.shape[1] < 4:
+        df[3] = [f"ultra_{i}" for i in range(1, len(df) + 1)]
 
-    # Drop rows where the chromosome is missing (gene-level rows without a
-    # chromosome assignment produce NaN in the Chr. column)
-    ucr_df = ucr_df.dropna(subset=['Chr.'])
-
-    # Normalise chromosome names to UCSC 'chrN' convention
+    ucr_df = df[[0, 1, 2, 3]].drop_duplicates()
+    ucr_df.columns = ['Chr.', 'BED_start', 'BED_end', 'UCR ID']
     ucr_df['Chr.'] = ucr_df['Chr.'].apply(normalize_chrom)
+    ucr_df['BED_start'] = ucr_df['BED_start'].astype(int)
+    ucr_df['BED_end'] = ucr_df['BED_end'].astype(int)
 
-    # BED format: 0-based start, 1-based end
-    ucr_df['BED_start'] = ucr_df['UCR start (bp)'].astype(int) - 1
-    ucr_df['BED_end'] = ucr_df['UCR end (bp)'].astype(int)
-
-    bed_df = ucr_df[['Chr.', 'BED_start', 'BED_end', 'UCR ID']]
-
-    print(f"Extracted {len(bed_df)} unique UCR regions.")
-    bed_df.to_csv(HG38_BED, sep='\t', header=False, index=False)
+    print(f"Extracted {len(ucr_df)} unique ultras regions.")
+    ucr_df.to_csv(HG38_BED, sep='\t', header=False, index=False)
     print(f"Saved hg38 coordinates to {HG38_BED}")
 
-    return bed_df
+    return ucr_df
 
 
 def run_liftover():
@@ -208,11 +221,11 @@ def generate_audit_report(hg38_df):
         # --- Header block with provenance metadata ---
         fh.write(f"## UCR Liftover Audit Report\n")
         fh.write(f"## Generated: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
-        fh.write(f"## Source: Giacopuzzi et al. 2020 (PMC6857462) Supplementary Table S1\n")
+        fh.write(f"## Source: UCSC unusualcons/ultras table (hg38.ultraConserved.bb)\n")
         fh.write(f"## Source assembly: GRCh38 / hg38\n")
         fh.write(f"## Target assembly: T2T-CHM13v2.0 / Hs1\n")
         fh.write(f"## Chain file: hg38ToHs1.over.chain.gz\n")
-        fh.write(f"## Excel SHA-256: {sha256sum(EXCEL_FILE)}\n")
+        fh.write(f"## UCSC ultras bigBed SHA-256: {sha256sum(ULTRAS_BB_FILE)}\n")
         fh.write(f"## Chain SHA-256: {sha256sum(CHAIN_FILE)}\n")
         fh.write(f"##\n")
 
@@ -302,13 +315,14 @@ def generate_audit_report(hg38_df):
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # 1. Download data files.
-    # Excel: use the bundled resources file when available; download otherwise.
-    if EXCEL_FILE == os.path.join(OUTPUT_DIR, "Supp_TableS1.xlsx"):
-        download_file(EXCEL_URL, EXCEL_FILE)
+    # 1. Download data files and utilities.
+    # UCSC ultras bigBed: use bundled resources file when available.
+    if ULTRAS_BB_FILE == os.path.join(OUTPUT_DIR, "hg38.ultraConserved.bb"):
+        download_file(ULTRAS_BB_URL, ULTRAS_BB_FILE)
     else:
-        print(f"Using bundled Excel file: {EXCEL_FILE}")
+        print(f"Using bundled ultras bigBed file: {ULTRAS_BB_FILE}")
     download_file(CHAIN_URL, CHAIN_FILE)
+    download_file(BIGBEDTOBED_URL, BIGBEDTOBED_BIN, make_executable=True)
 
     # liftOver binary is baked into the container; download only for local runs
     download_file(LIFTOVER_URL, LIFTOVER_BIN, make_executable=True)
