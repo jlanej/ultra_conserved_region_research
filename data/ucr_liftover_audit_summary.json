@@ -1,0 +1,28 @@
+{
+  "audit_files": {
+    "per_region_tsv": "/output/ucr_liftover_audit.tsv",
+    "summary_json": "/output/ucr_liftover_audit_summary.json"
+  },
+  "counts": {
+    "chromosome_changed": 0,
+    "mapped": 481,
+    "size_changed": 1,
+    "total": 481,
+    "unmapped": 0
+  },
+  "delta_length_bp": {
+    "max": 2,
+    "mean": 0.004158004158004158,
+    "min": 0
+  },
+  "generated_at_utc": "2026-03-11T00:42:17.783193+00:00",
+  "input_hashes": {
+    "chain_sha256": "926d4583eda8f90c88434293859b06906573f2469630e898b8b475ac8751327a",
+    "ultras_bigbed_sha256": "6313da26f27000389de7fea2e0676cbb162c9ed9c862938c9553aaf08e4c680e"
+  },
+  "mapping_rate_percent": 100.0,
+  "source": "UCSC unusualcons/ultras table (hg38.ultraConserved.bb)",
+  "source_assembly": "GRCh38/hg38",
+  "target_assembly": "T2T-CHM13v2.0/Hs1",
+  "unmapped_reason_counts": {}
+}
