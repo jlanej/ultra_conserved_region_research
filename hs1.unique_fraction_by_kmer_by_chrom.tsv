@@ -1,0 +1,2 @@
+assembly	kmer	chromosome	unique_bp	genome_bp	fraction_unique	percent_unique	strict_unique_filter_applied
+hs1	24	chr1	20	100	0.2	20.0	False
