@@ -1,5 +1,6 @@
 import os
 import sys
+import pytest
 
 REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, REPO_ROOT)
@@ -42,7 +43,9 @@ def test_unique_covered_bp_binary_intervals(tmp_path):
     )
 
     # Union coverage for chr1 is [0,30): 30 bp
-    assert cuf.unique_covered_bp(str(bed)) == 30
+    covered, strict_filter = cuf.unique_covered_bp(str(bed))
+    assert covered == 30
+    assert strict_filter is False
 
 
 def test_unique_covered_bp_filters_non_maximal_scores(tmp_path):
@@ -55,4 +58,24 @@ def test_unique_covered_bp_filters_non_maximal_scores(tmp_path):
 
     # Mixed score intervals should keep only maximum score as "truly unique".
     # Here score 1000 is kept and score 500 is excluded -> [5,15): 10 bp.
-    assert cuf.unique_covered_bp(str(bed)) == 10
+    covered, strict_filter = cuf.unique_covered_bp(str(bed))
+    assert covered == 10
+    assert strict_filter is True
+
+
+def test_parse_kmers_defaults_and_custom():
+    assert cuf.parse_kmers([]) == cuf.DEFAULT_KMERS
+    assert cuf.parse_kmers(["--kmers", "24,50,150"]) == (24, 50, 150)
+    assert cuf.parse_kmers(["--kmers=36,100"]) == (36, 100)
+
+
+def test_build_comparison_rows():
+    rows = [
+        {"kmer": 24, "fraction_unique": 0.5},
+        {"kmer": 36, "fraction_unique": 0.6},
+        {"kmer": 50, "fraction_unique": 0.61},
+    ]
+    out = cuf.build_comparison_rows(rows)
+    assert out[0]["delta_fraction_from_previous_k"] == ""
+    assert out[1]["delta_fraction_from_previous_k"] == pytest.approx(0.1)
+    assert out[2]["delta_percent_from_previous_k"] == pytest.approx(1.0)

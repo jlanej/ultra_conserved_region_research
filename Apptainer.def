@@ -53,7 +53,7 @@ From: python:3.12-slim
     Validate liftover with sequence alignment:
         apptainer exec --bind "$(pwd):/output" ucr-liftover.sif python /app/validate_liftover.py
 
-    Compute strict k=24 unique-genome fraction:
+    Compute strict hs1 unique-genome summary across k24,k36,k50,k100,k150,k250:
         apptainer exec --bind "$(pwd):/output" ucr-liftover.sif python /app/compute_unique_fraction.py
 
     Output files (liftover):

@@ -6,13 +6,10 @@ import subprocess
 import sys
 import urllib.request
 
-K24_UNIQUE_BB_URL = (
-    "https://hgdownload.soe.ucsc.edu/gbdb/hg38/hoffmanMappability/"
-    "k24.Unique.Mappability.bb"
-)
-HG38_CHROM_SIZES_URL = (
-    "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.chrom.sizes"
-)
+ASSEMBLY = "hs1"
+DEFAULT_KMERS = (24, 36, 50, 100, 150, 250)
+
+CHROM_SIZES_URL = f"https://hgdownload.soe.ucsc.edu/goldenPath/{ASSEMBLY}/bigZips/{ASSEMBLY}.chrom.sizes"
 BIGBEDTOBED_URL = "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedToBed"
 BIGBEDINFO_URL = "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedInfo"
 
@@ -32,13 +29,25 @@ BIGBEDINFO_BIN = (
     else os.path.join(OUTPUT_DIR, "bigBedInfo")
 )
 
-K24_UNIQUE_BB_FILE = os.path.join(OUTPUT_DIR, "k24.Unique.Mappability.bb")
-HG38_CHROM_SIZES_FILE = os.path.join(OUTPUT_DIR, "hg38.chrom.sizes")
-K24_UNIQUE_BED_FILE = os.path.join(OUTPUT_DIR, "k24.unique.bed")
-SUMMARY_TSV = os.path.join(OUTPUT_DIR, "k24.unique_fraction.tsv")
+CHROM_SIZES_FILE = os.path.join(OUTPUT_DIR, f"{ASSEMBLY}.chrom.sizes")
+SUMMARY_TSV = os.path.join(OUTPUT_DIR, f"{ASSEMBLY}.unique_fraction_by_kmer.tsv")
+COMPARISON_TSV = os.path.join(OUTPUT_DIR, f"{ASSEMBLY}.unique_fraction_comparison.tsv")
+SUMMARY_TXT = os.path.join(OUTPUT_DIR, f"{ASSEMBLY}.unique_fraction_summary.txt")
 
 # "Primary" here includes chrM by default; --exclude-chrM removes it.
 PRIMARY_RE = re.compile(r"^chr([1-9]|1[0-9]|2[0-2]|X|Y|M)$")
+
+
+def kmer_bb_url(k):
+    return f"https://hgdownload.soe.ucsc.edu/gbdb/{ASSEMBLY}/hoffmanMappability/k{k}.Unique.Mappability.bb"
+
+
+def bb_file_path(k):
+    return os.path.join(OUTPUT_DIR, f"k{k}.Unique.Mappability.bb")
+
+
+def bed_file_path(k):
+    return os.path.join(OUTPUT_DIR, f"k{k}.unique.bed")
 
 
 def download_file(url, filename, make_executable=False):
@@ -52,10 +61,23 @@ def download_file(url, filename, make_executable=False):
         os.chmod(filename, st.st_mode | stat.S_IEXEC)
 
 
+def parse_kmers(argv):
+    for i, arg in enumerate(argv):
+        if arg == "--kmers" and i + 1 < len(argv):
+            return tuple(int(x.strip()) for x in argv[i + 1].split(",") if x.strip())
+        if arg.startswith("--kmers="):
+            val = arg.split("=", 1)[1]
+            return tuple(int(x.strip()) for x in val.split(",") if x.strip())
+    return DEFAULT_KMERS
+
+
 def parse_args(argv):
     primary_only = "--primary-only" in argv
     exclude_chrm = "--exclude-chrM" in argv
-    return primary_only, exclude_chrm
+    kmers = parse_kmers(argv)
+    if not kmers:
+        raise ValueError("At least one k-mer must be provided.")
+    return primary_only, exclude_chrm, tuple(sorted(set(kmers)))
 
 
 def chrom_allowed(chrom, primary_only, exclude_chrm):
@@ -113,7 +135,7 @@ def unique_covered_bp(bed_file, primary_only=False, exclude_chrm=False):
             records.append((chrom, start, end, score))
 
     if not records:
-        return 0
+        return 0, False
 
     filter_non_maximal_scores = False
     unique_score_threshold = None
@@ -144,12 +166,12 @@ def unique_covered_bp(bed_file, primary_only=False, exclude_chrm=False):
                 covered += cur_end - cur_start
                 cur_start, cur_end = start, end
         covered += cur_end - cur_start
-    return covered
+    return covered, filter_non_maximal_scores
 
 
-def bigbed_to_bed():
+def bigbed_to_bed(bb_file, bed_file):
     result = subprocess.run(
-        [BIGBEDTOBED_BIN, K24_UNIQUE_BB_FILE, K24_UNIQUE_BED_FILE],
+        [BIGBEDTOBED_BIN, bb_file, bed_file],
         capture_output=True,
         text=True,
     )
@@ -158,10 +180,9 @@ def bigbed_to_bed():
         result.check_returncode()
 
 
-def inspect_bigbed():
-    """Print bigBed metadata so users can verify whether values are binary or scored."""
+def inspect_bigbed(bb_file):
     result = subprocess.run(
-        [BIGBEDINFO_BIN, K24_UNIQUE_BB_FILE],
+        [BIGBEDINFO_BIN, bb_file],
         capture_output=True,
         text=True,
     )
@@ -172,51 +193,140 @@ def inspect_bigbed():
         print(f"bigBedInfo warning:\n{result.stderr}", file=sys.stderr)
 
 
-def write_summary(unique_bp, genome_bp, fraction, percent):
+def build_comparison_rows(rows):
+    comparisons = []
+    previous = None
+    for row in rows:
+        if previous is None:
+            comparisons.append({
+                "kmer": row["kmer"],
+                "fraction_unique": row["fraction_unique"],
+                "delta_fraction_from_previous_k": "",
+                "delta_percent_from_previous_k": "",
+            })
+        else:
+            delta_fraction = row["fraction_unique"] - previous["fraction_unique"]
+            comparisons.append({
+                "kmer": row["kmer"],
+                "fraction_unique": row["fraction_unique"],
+                "delta_fraction_from_previous_k": delta_fraction,
+                "delta_percent_from_previous_k": 100.0 * delta_fraction,
+            })
+        previous = row
+    return comparisons
+
+
+def write_summary(rows):
     with open(SUMMARY_TSV, "w", newline="") as fh:
         writer = csv.writer(fh, delimiter="\t")
-        writer.writerow(["unique_bp", "genome_bp", "fraction_unique_24", "percent_unique_24"])
-        writer.writerow([unique_bp, genome_bp, fraction, percent])
+        writer.writerow([
+            "assembly",
+            "kmer",
+            "unique_bp",
+            "genome_bp",
+            "fraction_unique",
+            "percent_unique",
+            "strict_unique_filter_applied",
+        ])
+        for row in rows:
+            writer.writerow([
+                row["assembly"],
+                row["kmer"],
+                row["unique_bp"],
+                row["genome_bp"],
+                row["fraction_unique"],
+                row["percent_unique"],
+                row["strict_unique_filter_applied"],
+            ])
+
+    comparisons = build_comparison_rows(rows)
+    with open(COMPARISON_TSV, "w", newline="") as fh:
+        writer = csv.writer(fh, delimiter="\t")
+        writer.writerow([
+            "kmer",
+            "fraction_unique",
+            "delta_fraction_from_previous_k",
+            "delta_percent_from_previous_k",
+        ])
+        for row in comparisons:
+            writer.writerow([
+                row["kmer"],
+                row["fraction_unique"],
+                row["delta_fraction_from_previous_k"],
+                row["delta_percent_from_previous_k"],
+            ])
+
+    with open(SUMMARY_TXT, "w") as fh:
+        fh.write(f"Assembly: {ASSEMBLY}\n")
+        fh.write("Metric: strict unique mappability fraction by k-mer\n")
+        fh.write("Numerator: union bp at maximal score per track when scores vary; otherwise binary interval union.\n")
+        fh.write("Denominator: total bp in selected chrom.sizes set.\n\n")
+        fh.write("k-mer summary:\n")
+        for row in rows:
+            fh.write(
+                f"  k={row['kmer']}: {row['percent_unique']:.6f}% "
+                f"(unique_bp={row['unique_bp']}, genome_bp={row['genome_bp']})\n"
+            )
+        fh.write("\nPairwise change vs previous k:\n")
+        for row in comparisons[1:]:
+            fh.write(
+                f"  k={row['kmer']}: delta={row['delta_percent_from_previous_k']:.6f} percentage points\n"
+            )
 
 
 def main(argv=None):
     argv = argv or sys.argv[1:]
-    primary_only, exclude_chrm = parse_args(argv)
+    primary_only, exclude_chrm, kmers = parse_args(argv)
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     download_file(BIGBEDTOBED_URL, BIGBEDTOBED_BIN, make_executable=True)
     download_file(BIGBEDINFO_URL, BIGBEDINFO_BIN, make_executable=True)
-    download_file(K24_UNIQUE_BB_URL, K24_UNIQUE_BB_FILE)
-    download_file(HG38_CHROM_SIZES_URL, HG38_CHROM_SIZES_FILE)
-
-    inspect_bigbed()
-    print("Converting bigBed to BED...")
-    bigbed_to_bed()
+    download_file(CHROM_SIZES_URL, CHROM_SIZES_FILE)
 
     genome_bp = genome_size_bp(
-        HG38_CHROM_SIZES_FILE,
+        CHROM_SIZES_FILE,
         primary_only=primary_only,
         exclude_chrm=exclude_chrm,
     )
-    unique_bp = unique_covered_bp(
-        K24_UNIQUE_BED_FILE,
-        primary_only=primary_only,
-        exclude_chrm=exclude_chrm,
-    )
-
     if genome_bp == 0:
         raise ValueError("Genome size is zero after chromosome filters.")
 
-    fraction = unique_bp / genome_bp
-    percent = 100.0 * fraction
+    rows = []
+    for k in kmers:
+        bb_file = bb_file_path(k)
+        bed_file = bed_file_path(k)
+        download_file(kmer_bb_url(k), bb_file)
+        print(f"\\n=== k={k} ===")
+        inspect_bigbed(bb_file)
+        print("Converting bigBed to BED...")
+        bigbed_to_bed(bb_file, bed_file)
 
-    print(f"unique_bp\t{unique_bp}")
-    print(f"genome_bp\t{genome_bp}")
-    print(f"fraction_unique_24\t{fraction}")
-    print(f"percent_unique_24\t{percent}")
+        unique_bp, strict_filter = unique_covered_bp(
+            bed_file,
+            primary_only=primary_only,
+            exclude_chrm=exclude_chrm,
+        )
+        fraction = unique_bp / genome_bp
+        percent = 100.0 * fraction
+        row = {
+            "assembly": ASSEMBLY,
+            "kmer": k,
+            "unique_bp": unique_bp,
+            "genome_bp": genome_bp,
+            "fraction_unique": fraction,
+            "percent_unique": percent,
+            "strict_unique_filter_applied": strict_filter,
+        }
+        rows.append(row)
+        print(
+            f"k={k}\tunique_bp={unique_bp}\tgenome_bp={genome_bp}"
+            f"\tfraction_unique={fraction}\tpercent_unique={percent}"
+        )
 
-    write_summary(unique_bp, genome_bp, fraction, percent)
-    print(f"Saved summary to {SUMMARY_TSV}")
+    write_summary(rows)
+    print(f"Saved k-mer summary to {SUMMARY_TSV}")
+    print(f"Saved comparison table to {COMPARISON_TSV}")
+    print(f"Saved text summary to {SUMMARY_TXT}")
 
 
 if __name__ == "__main__":
