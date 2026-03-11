@@ -77,5 +77,6 @@ def test_build_comparison_rows():
     ]
     out = cuf.build_comparison_rows(rows)
     assert out[0]["delta_fraction_from_previous_k"] == ""
+    assert out[1]["delta_percent_from_previous_k"] == pytest.approx(10.0)
     assert out[1]["delta_fraction_from_previous_k"] == pytest.approx(0.1)
     assert out[2]["delta_percent_from_previous_k"] == pytest.approx(1.0)

@@ -75,8 +75,6 @@ def parse_args(argv):
     primary_only = "--primary-only" in argv
     exclude_chrm = "--exclude-chrM" in argv
     kmers = parse_kmers(argv)
-    if not kmers:
-        raise ValueError("At least one k-mer must be provided.")
     return primary_only, exclude_chrm, tuple(sorted(set(kmers)))
 
 
@@ -296,7 +294,7 @@ def main(argv=None):
         bb_file = bb_file_path(k)
         bed_file = bed_file_path(k)
         download_file(kmer_bb_url(k), bb_file)
-        print(f"\\n=== k={k} ===")
+        print(f"\n=== k={k} ===")
         inspect_bigbed(bb_file)
         print("Converting bigBed to BED...")
         bigbed_to_bed(bb_file, bed_file)
