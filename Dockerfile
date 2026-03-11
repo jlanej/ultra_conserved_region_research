@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY convert_ucr_to_t2t.py .
 COPY validate_liftover.py .
+COPY compute_unique_fraction.py .
 COPY resources/ ./resources/
 
 # Bake the UCSC binaries into the image (small tools, ~3 MB each).
@@ -25,7 +26,12 @@ RUN wget --tries=3 --waitretry=5 -O liftOver \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedToBed" && \
     wget --tries=3 --waitretry=5 -O twoBitToFa \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitToFa" && \
-    chmod +x liftOver bigBedToBed twoBitToFa
+    wget --tries=3 --waitretry=5 -O bigBedInfo \
+        "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedInfo" && \
+    # Keep bigBedSummary available for UCSC mappability track sanity checks.
+    wget --tries=3 --waitretry=5 -O bigBedSummary \
+        "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedSummary" && \
+    chmod +x liftOver bigBedToBed twoBitToFa bigBedInfo bigBedSummary
 
 ENV OUTPUT_DIR=/output
 VOLUME /output

@@ -85,12 +85,14 @@ pairwise alignment to confirm sequence identity across the liftover.
 | Tool | Version | Source | Purpose |
 |---|---|---|---|
 | [UCSC `bigBedToBed`](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Convert UCSC bigBed (`ultras.bb`) to BED |
+| [UCSC `bigBedInfo`](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Inspect bigBed schema/metadata to verify binary vs scored intervals |
+| [UCSC `bigBedSummary`](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Summarise mappability values from UCSC bigBed tracks |
 | [UCSC `liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Coordinate conversion between genome assemblies |
 | [UCSC `twoBitToFa`](https://genome.ucsc.edu/goldenPath/help/twoBit.html) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Sequence extraction from 2bit genome files |
 
-All three binaries are baked into the Docker and Apptainer container images at
-build time. For bare-metal runs they are downloaded automatically on first
-execution.
+All UCSC binaries above are baked into the Docker and Apptainer container images at
+build time. For bare-metal runs, binaries required by a given script are
+downloaded automatically on first execution.
 
 ### Python dependencies (`requirements.txt`)
 
@@ -108,6 +110,8 @@ execution.
 | `hg38ToHs1.over.chain.gz` | ~10 MB | [UCSC goldenPath](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHs1.over.chain.gz) | `convert_ucr_to_t2t.py` |
 | `hg38.2bit` | ~800 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.2bit) | `validate_liftover.py` |
 | `hs1.2bit` | ~780 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hs1/bigZips/hs1.2bit) | `validate_liftover.py` |
+| `k24/k36/k50/k100/k150/k250.Unique.Mappability.bb` | large track files (downloaded at runtime) | [UCSC gbdb hs1/hoffmanMappability](https://hgdownload.soe.ucsc.edu/gbdb/hs1/hoffmanMappability/) | `compute_unique_fraction.py` |
+| `hs1.chrom.sizes` | small text file | [UCSC bigZips](https://hgdownload.soe.ucsc.edu/goldenPath/hs1/bigZips/hs1.chrom.sizes) | `compute_unique_fraction.py` |
 
 ### Container platforms
 
@@ -155,6 +159,43 @@ apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_r
     python /app/validate_liftover.py
 ```
 
+### hs1 unique-genome fraction by k-mer (Apptainer one-liner)
+
+Compute strict unique mappability fractions on **T2T/hs1** across
+`k24`, `k36`, `k50`, `k100`, `k150`, and `k250`:
+
+```bash
+apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest \
+    python /app/compute_unique_fraction.py
+```
+
+Optional denominator and k-mer filters:
+
+```bash
+# Primary chromosomes only (chr1-22, X, Y, M)
+apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest \
+    python /app/compute_unique_fraction.py --primary-only
+
+# Exclude chrM from denominator and numerator
+apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest \
+    python /app/compute_unique_fraction.py --primary-only --exclude-chrM
+
+# Run a custom subset of kmers
+apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest \
+    python /app/compute_unique_fraction.py --kmers 24,50,100
+```
+
+The module writes:
+
+- `hs1.unique_fraction_by_kmer.tsv` (per-k strict unique fraction table)
+- `hs1.unique_fraction_comparison.tsv` (per-k deltas vs previous k)
+- `hs1.unique_fraction_summary.txt` (concise scientific summary text)
+
+It also prints `bigBedInfo` metadata per track so you can verify whether the
+track behaves as binary intervals or contains scored values. If scored values
+are present, the numerator keeps only intervals at the maximum score (i.e.
+strictly unique regions) and excludes lower-scored/partial intervals.
+
 ## Running locally
 
 ### Prerequisites
@@ -172,6 +213,9 @@ python convert_ucr_to_t2t.py
 
 # Step 2: Sequence validation (optional – downloads ~1.6 GB of genome data)
 python validate_liftover.py
+
+# Step 3: hs1 unique fraction summary across multiple kmers (optional)
+python compute_unique_fraction.py
 ```
 
 Both scripts are self-contained: they download all required data files and
@@ -198,6 +242,7 @@ Results will appear in the `results/` directory.
 .
 ├── convert_ucr_to_t2t.py          # Liftover pipeline (hg38 → T2T-CHM13)
 ├── validate_liftover.py           # Sequence extraction and pairwise alignment
+├── compute_unique_fraction.py     # hs1 strict unique mappability summary across multiple kmers
 ├── requirements.txt               # Python dependencies
 ├── Dockerfile                     # Docker container definition
 ├── Apptainer.def                  # Apptainer/Singularity definition (HPC)
