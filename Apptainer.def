@@ -19,9 +19,11 @@ From: python:3.12-slim
     # Bake the UCSC binaries into the image (small tools, ~3 MB each)
     wget --tries=3 --waitretry=5 -O /app/liftOver \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver" && \
+    wget --tries=3 --waitretry=5 -O /app/bigBedToBed \
+        "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedToBed" && \
     wget --tries=3 --waitretry=5 -O /app/twoBitToFa \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitToFa" && \
-        chmod +x /app/liftOver /app/twoBitToFa
+        chmod +x /app/liftOver /app/bigBedToBed /app/twoBitToFa
 
 %environment
     export OUTPUT_DIR="${OUTPUT_DIR:-$(pwd)}"
@@ -31,8 +33,8 @@ From: python:3.12-slim
 
 %help
     Lift over human Ultraconserved Regions from hg38 to T2T-CHM13v2.0.
-    The liftOver and twoBitToFa binaries are bundled in the image. Large
-    data files (chain file, Excel spreadsheet, genomes) are downloaded
+    The liftOver, bigBedToBed, and twoBitToFa binaries are bundled in the image.
+    Large data files (ultras bigBed when missing, chain file, genomes) are downloaded
     automatically on first run.
 
     One-liner (pulls image, runs pipeline, writes output to CWD):

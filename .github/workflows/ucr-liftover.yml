@@ -47,6 +47,7 @@ jobs:
           cp results/ucr_t2t_chm13.bed data/ 2>/dev/null || true
           cp results/ucr_unmapped.bed data/ 2>/dev/null || true
           cp results/ucr_liftover_audit.tsv data/ 2>/dev/null || true
+          cp results/ucr_liftover_audit_summary.json data/ 2>/dev/null || true
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

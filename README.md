@@ -6,54 +6,41 @@ Automated pipeline to lift over human **Ultraconserved Regions (UCRs)** from the
 
 Ultraconserved elements (UCEs) were first identified by
 [Bejerano *et al.* 2004](https://doi.org/10.1126/science.1098119), who reported
-**481** genomic segments ≥ 200 bp that are 100 % identical between human, rat,
-and mouse.
-[Stephen *et al.* 2008](https://doi.org/10.1371/journal.pgen.1000030) later
-expanded this catalogue by comparing five placental mammals (human, dog, cow,
-mouse, and rat), identifying **2,189** sequences ≥ 200 bp and **13,736**
-sequences ≥ 100 bp conserved in at least three of the five species.
+genomic segments ≥ 200 bp that are 100 % identical between human, rat, and
+mouse.
 
-This project lifts over the UCEs catalogued by
-[Giacopuzzi *et al.* 2020 (PMC6857462)](https://pmc.ncbi.nlm.nih.gov/articles/PMC6857462/)
-— which builds on the Stephen *et al.* 2008 set (UCR IDs run to 13,736) —
-from GRCh38/hg38 to the first complete, gapless human genome assembly
+This project uses the UCSC Genome Browser `compGeno/unusualcons/ultras` track
+as the hg38 source of ultraconserved regions and lifts those coordinates from
+GRCh38/hg38 to the first complete, gapless human genome assembly
 ([T2T-CHM13v2.0](https://www.ncbi.nlm.nih.gov/assembly/GCA_009914755.4/)).
 
 ### Data source
 
-Bundled `resources/Supp_TableS1.xlsx` (also available from
-[PMC6857462 Supplementary Table S1](https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx))
-lists genes that overlap UCEs, together with UCR coordinates.  Each gene–UCE
-pair occupies one row; a single UCE may appear multiple times (once per
-overlapping gene).  Rows without a chromosome assignment (genes on unplaced
-contigs) are excluded before coordinate extraction.
-The first data row looks like:
-
-| Gene ID | Associated gene name | Chr. | Gene start (bp) | Gene end (bp) | Gene length (bp) | Gene type | Number of UCRs in this gene | UCR ID | UCR start (bp) | UCR end (bp) | 10⁶×(Number of UCRs/Gene Length) |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| ENSG00000142611 | PRDM16 | 1 | 3069168 | 3438621 | 369454 | protein_coding | 1 | 5 | 3075350 | 3075602 | 2.7 |
+Bundled `resources/hg38.ultraConserved.bb` is the primary source file. It was
+exported from the UCSC table browser schema:
+[`compGeno` → `unusualcons` → `ultras`](https://genome.ucsc.edu/cgi-bin/hgTables?db=hg38&hgta_group=compGeno&hgta_track=unusualcons&hgta_table=ultras&hgta_doSchema=describe+table+schema).
+The pipeline converts this bigBed file to BED4 (`chrom`, `start`, `end`,
+`name`) before liftover.
 
 ## How it works
 
 ### Step 1 – Liftover (`convert_ucr_to_t2t.py`)
 
-1. **Source** – The bundled `resources/Supp_TableS1.xlsx` (checked into the
-   repository) is used as the primary input.  If the file is not found (e.g. a
-   bare-metal run outside the repository tree), it is downloaded from
-   [PMC6857462](https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx).
-   The `hg38ToHs1.over.chain.gz` chain file is always downloaded at runtime.
-   The UCSC [`liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) binary is
-   bundled inside the container image; for bare-metal runs it is downloaded
-   automatically.
-2. **Extract** – Unique UCR coordinates (`Chr.`, `UCR start`, `UCR end`, `UCR ID`)
-   are extracted from the spreadsheet. Chromosome names are normalised to `chrN`
-   format and start positions are converted from 1-based to 0-based for BED.
+1. **Source** – The bundled `resources/hg38.ultraConserved.bb` is used as the
+   primary input. If the file is not found (e.g. a bare-metal run outside the
+   repository tree), it is downloaded from UCSC (`gbdb/hg38/bbi/ultras.bb`).
+   The `hg38ToHs1.over.chain.gz` chain file is downloaded at runtime.
+2. **Extract** – UCSC [`bigBedToBed`](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/)
+   converts `hg38.ultraConserved.bb` to BED. The pipeline keeps BED4 columns
+   (`chrom`, `start`, `end`, `name`) and normalises chromosome names to `chrN`.
 3. **Lift over** – `liftOver` maps each region from hg38 to T2T-CHM13v2.0.
 4. **Audit** – A comprehensive audit report (`ucr_liftover_audit.tsv`) is
    generated pairing every input UCR with its liftover result, including:
    mapping status, coordinate shifts, size deltas, chromosome concordance,
-   and SHA-256 checksums of input files for full reproducibility.
-5. **Output** – Four files are produced in the output directory:
+   and SHA-256 checksums of input files for reproducibility. A structured
+   summary (`ucr_liftover_audit_summary.json`) is also produced for automation
+   and CI diffing.
+5. **Output** – Five files are produced in the output directory:
 
 | File | Description |
 |---|---|
@@ -61,6 +48,7 @@ The first data row looks like:
 | `ucr_t2t_chm13.bed` | Successfully mapped coordinates on T2T-CHM13 |
 | `ucr_unmapped.bed` | Unmapped regions with liftOver failure reasons |
 | `ucr_liftover_audit.tsv` | Full audit report for QC and traceability |
+| `ucr_liftover_audit_summary.json` | Machine-readable rollup (counts, reason breakdown, delta-length stats, hashes) |
 
 ### Step 2 – Sequence validation (`validate_liftover.py`)
 
@@ -96,10 +84,11 @@ pairwise alignment to confirm sequence identity across the liftover.
 
 | Tool | Version | Source | Purpose |
 |---|---|---|---|
+| [UCSC `bigBedToBed`](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Convert UCSC bigBed (`ultras.bb`) to BED |
 | [UCSC `liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Coordinate conversion between genome assemblies |
 | [UCSC `twoBitToFa`](https://genome.ucsc.edu/goldenPath/help/twoBit.html) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Sequence extraction from 2bit genome files |
 
-Both binaries are baked into the Docker and Apptainer container images at
+All three binaries are baked into the Docker and Apptainer container images at
 build time. For bare-metal runs they are downloaded automatically on first
 execution.
 
@@ -107,8 +96,7 @@ execution.
 
 | Package | Purpose |
 |---|---|
-| [pandas](https://pandas.pydata.org/) | Tabular data manipulation (Excel → BED conversion) |
-| [openpyxl](https://openpyxl.readthedocs.io/) | Excel `.xlsx` file reading (pandas backend) |
+| [pandas](https://pandas.pydata.org/) | BED file parsing, deduplication, and type conversion |
 | [requests](https://docs.python-requests.org/) | HTTP client library |
 | [biopython](https://biopython.org/) | FASTA I/O (`Bio.SeqIO`) and Needleman–Wunsch pairwise alignment (`Bio.Align.PairwiseAligner`) |
 
@@ -116,7 +104,7 @@ execution.
 
 | File | Size | Source | Used by |
 |---|---|---|---|
-| `resources/Supp_TableS1.xlsx` | ~200 KB | Bundled in repository (fallback: [PMC6857462](https://pmc.ncbi.nlm.nih.gov/articles/instance/6857462/bin/Supp_TableS1.xlsx)) | `convert_ucr_to_t2t.py` |
+| `resources/hg38.ultraConserved.bb` | ~43 KB | Bundled in repository (fallback: [UCSC gbdb ultras.bb](https://hgdownload.soe.ucsc.edu/gbdb/hg38/bbi/ultras.bb)) | `convert_ucr_to_t2t.py` |
 | `hg38ToHs1.over.chain.gz` | ~10 MB | [UCSC goldenPath](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHs1.over.chain.gz) | `convert_ucr_to_t2t.py` |
 | `hg38.2bit` | ~800 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.2bit) | `validate_liftover.py` |
 | `hs1.2bit` | ~780 MB | [UCSC goldenPath](https://hgdownload.cse.ucsc.edu/goldenPath/hs1/bigZips/hs1.2bit) | `validate_liftover.py` |
@@ -138,9 +126,10 @@ apptainer run --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_re
 ```
 
 That's it. The `--bind` flag maps your current directory to the container's
-`/output` so results are written to the host filesystem. The `liftOver` binary
-is bundled in the image; only the data files (chain file, Excel spreadsheet)
-download at runtime. All output files land in your current working directory.
+`/output` so results are written to the host filesystem. UCSC tools are bundled
+in the image; data/tool files (`ultras.bb`, `hg38ToHs1` chain,
+`bigBedToBed`) download at runtime when not already present. All output files
+land in your current working directory.
 No build step, no `pip install`, fully batteries-included.
 
 To write output to a specific directory:
@@ -213,7 +202,7 @@ Results will appear in the `results/` directory.
 ├── Dockerfile                     # Docker container definition
 ├── Apptainer.def                  # Apptainer/Singularity definition (HPC)
 ├── resources/
-│   └── Supp_TableS1.xlsx          # Bundled UCR catalogue (Giacopuzzi et al. 2020)
+│   └── hg38.ultraConserved.bb     # Bundled UCSC ultras bigBed source (hg38)
 ├── tests/
 │   └── test_convert_ucr_to_t2t.py # Integration tests
 ├── .github/workflows/
@@ -237,17 +226,22 @@ To run manually, go to **Actions → UCR Liftover → Run workflow**.
 
 The audit report (`ucr_liftover_audit.tsv`) is a tab-separated file with:
 
-- **Provenance header** — timestamp, source paper, assembly versions, SHA-256
-  checksums of input files
+- **Provenance header** — timestamp, UCSC source dataset, assembly versions,
+  SHA-256 checksums of input files
 - **Per-region columns** — `ucr_id`, `hg38_chrom`, `hg38_start`, `hg38_end`,
   `hg38_length`, `status` (MAPPED/UNMAPPED), `t2t_chrom`, `t2t_start`,
   `t2t_end`, `t2t_length`, `delta_length`, `delta_start`, `chrom_changed`,
   `reason`
 - **Summary footer** — total/mapped/unmapped counts, chromosome-change and
-  size-change counts, mapping rate
+  size-change counts, mapping rate, and unmapped-reason counts
 
 Regions flagged with `chrom_changed=YES` or non-zero `delta_length` deserve
 manual review. Unmapped regions include the failure reason from liftOver.
+
+The JSON companion (`ucr_liftover_audit_summary.json`) captures the same
+high-level audit metrics in machine-readable form:
+total/mapped/unmapped counts, mapping rate, unmapped reason histogram,
+delta-length min/max/mean, and input file hashes.
 
 ## Alignment report
 
@@ -266,11 +260,11 @@ positions differ.
 
 ### Coordinate liftover
 
-UCR coordinates from [Giacopuzzi *et al.* 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC6857462/)
-Supplementary Table S1 are extracted and converted to BED format (0-based
-half-open intervals). Chromosome names are normalised to UCSC `chrN` convention.
-The UCSC `liftOver` tool maps each region from GRCh38/hg38 to T2T-CHM13v2.0
-(Hs1) using the `hg38ToHs1.over.chain.gz` chain file from the
+Coordinates from UCSC `unusualcons/ultras` (`hg38.ultraConserved.bb`) are
+converted to BED format (0-based half-open intervals) using `bigBedToBed`.
+Chromosome names are normalised to UCSC `chrN` convention. The UCSC `liftOver`
+tool maps each region from GRCh38/hg38 to T2T-CHM13v2.0 (Hs1) using the
+`hg38ToHs1.over.chain.gz` chain file from the
 [UCSC goldenPath](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/).
 
 ### Sequence extraction
@@ -305,14 +299,8 @@ matches.
 - Bejerano, G. *et al.* (2004). "Ultraconserved elements in the human genome."
   *Science*, 304(5675), 1321–1325.
   [doi:10.1126/science.1098119](https://doi.org/10.1126/science.1098119)
-- Stephen, S. *et al.* (2008). "Large-scale appearance of ultraconserved elements
-  in tetrapod genomes and slowdown of the molecular clock."
-  *PLOS Genetics*, 4(2), e1000030.
-  [doi:10.1371/journal.pgen.1000030](https://doi.org/10.1371/journal.pgen.1000030)
-- Giacopuzzi, E. *et al.* (2020). "Population-scale distribution and copy number
-  variation of ultraconserved elements in the human genome."
-  *Human Mutation*, 41(6), 1101–1111.
-  [PMC6857462](https://pmc.ncbi.nlm.nih.gov/articles/PMC6857462/)
+- UCSC Table Browser schema for `unusualcons/ultras` (hg38):
+  [schema description](https://genome.ucsc.edu/cgi-bin/hgTables?db=hg38&hgta_group=compGeno&hgta_track=unusualcons&hgta_table=ultras&hgta_doSchema=describe+table+schema)
 - Nurk, S. *et al.* (2022). "The complete sequence of a human genome."
   *Science*, 376(6588), 44–53.
   [doi:10.1126/science.abj6987](https://doi.org/10.1126/science.abj6987)
