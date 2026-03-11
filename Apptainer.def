@@ -8,6 +8,7 @@ From: python:3.12-slim
 %files
     convert_ucr_to_t2t.py /app/convert_ucr_to_t2t.py
     validate_liftover.py /app/validate_liftover.py
+    compute_unique_fraction.py /app/compute_unique_fraction.py
     requirements.txt /app/requirements.txt
     resources /app/resources
 
@@ -23,7 +24,11 @@ From: python:3.12-slim
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedToBed" && \
     wget --tries=3 --waitretry=5 -O /app/twoBitToFa \
         "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitToFa" && \
-        chmod +x /app/liftOver /app/bigBedToBed /app/twoBitToFa
+    wget --tries=3 --waitretry=5 -O /app/bigBedInfo \
+        "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedInfo" && \
+    wget --tries=3 --waitretry=5 -O /app/bigBedSummary \
+        "https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigBedSummary" && \
+        chmod +x /app/liftOver /app/bigBedToBed /app/twoBitToFa /app/bigBedInfo /app/bigBedSummary
 
 %environment
     export OUTPUT_DIR="${OUTPUT_DIR:-$(pwd)}"
@@ -33,7 +38,7 @@ From: python:3.12-slim
 
 %help
     Lift over human Ultraconserved Regions from hg38 to T2T-CHM13v2.0.
-    The liftOver, bigBedToBed, and twoBitToFa binaries are bundled in the image.
+    The liftOver, bigBedToBed, twoBitToFa, bigBedInfo, and bigBedSummary binaries are bundled in the image.
     Large data files (ultras bigBed when missing, chain file, genomes) are downloaded
     automatically on first run.
 
@@ -46,6 +51,9 @@ From: python:3.12-slim
 
     Validate liftover with sequence alignment:
         apptainer exec --bind "$(pwd):/output" ucr-liftover.sif python /app/validate_liftover.py
+
+    Compute strict k=24 unique-genome fraction:
+        apptainer exec --bind "$(pwd):/output" ucr-liftover.sif python /app/compute_unique_fraction.py
 
     Output files (liftover):
         ucr_hg38.bed            - input UCR coordinates (hg38)
