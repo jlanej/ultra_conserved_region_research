@@ -37,8 +37,10 @@ The pipeline converts this bigBed file to BED4 (`chrom`, `start`, `end`,
 4. **Audit** – A comprehensive audit report (`ucr_liftover_audit.tsv`) is
    generated pairing every input UCR with its liftover result, including:
    mapping status, coordinate shifts, size deltas, chromosome concordance,
-   and SHA-256 checksums of input files for full reproducibility.
-5. **Output** – Four files are produced in the output directory:
+   and SHA-256 checksums of input files for reproducibility. A structured
+   summary (`ucr_liftover_audit_summary.json`) is also produced for automation
+   and CI diffing.
+5. **Output** – Five files are produced in the output directory:
 
 | File | Description |
 |---|---|
@@ -46,6 +48,7 @@ The pipeline converts this bigBed file to BED4 (`chrom`, `start`, `end`,
 | `ucr_t2t_chm13.bed` | Successfully mapped coordinates on T2T-CHM13 |
 | `ucr_unmapped.bed` | Unmapped regions with liftOver failure reasons |
 | `ucr_liftover_audit.tsv` | Full audit report for QC and traceability |
+| `ucr_liftover_audit_summary.json` | Machine-readable rollup (counts, reason breakdown, delta-length stats, hashes) |
 
 ### Step 2 – Sequence validation (`validate_liftover.py`)
 
@@ -85,7 +88,7 @@ pairwise alignment to confirm sequence identity across the liftover.
 | [UCSC `liftOver`](https://genome.ucsc.edu/cgi-bin/hgLiftOver) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Coordinate conversion between genome assemblies |
 | [UCSC `twoBitToFa`](https://genome.ucsc.edu/goldenPath/help/twoBit.html) | latest linux.x86_64 | [UCSC Downloads](https://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/) | Sequence extraction from 2bit genome files |
 
-Both binaries are baked into the Docker and Apptainer container images at
+All three binaries are baked into the Docker and Apptainer container images at
 build time. For bare-metal runs they are downloaded automatically on first
 execution.
 
@@ -123,8 +126,8 @@ apptainer run --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_re
 ```
 
 That's it. The `--bind` flag maps your current directory to the container's
-`/output` so results are written to the host filesystem. The `liftOver` binary
-is bundled in the image; data/tool files (`ultras.bb`, `hg38ToHs1` chain,
+`/output` so results are written to the host filesystem. UCSC tools are bundled
+in the image; data/tool files (`ultras.bb`, `hg38ToHs1` chain,
 `bigBedToBed`) download at runtime when not already present. All output files
 land in your current working directory.
 No build step, no `pip install`, fully batteries-included.
@@ -223,17 +226,22 @@ To run manually, go to **Actions → UCR Liftover → Run workflow**.
 
 The audit report (`ucr_liftover_audit.tsv`) is a tab-separated file with:
 
-- **Provenance header** — timestamp, source paper, assembly versions, SHA-256
-  checksums of input files
+- **Provenance header** — timestamp, UCSC source dataset, assembly versions,
+  SHA-256 checksums of input files
 - **Per-region columns** — `ucr_id`, `hg38_chrom`, `hg38_start`, `hg38_end`,
   `hg38_length`, `status` (MAPPED/UNMAPPED), `t2t_chrom`, `t2t_start`,
   `t2t_end`, `t2t_length`, `delta_length`, `delta_start`, `chrom_changed`,
   `reason`
 - **Summary footer** — total/mapped/unmapped counts, chromosome-change and
-  size-change counts, mapping rate
+  size-change counts, mapping rate, and unmapped-reason counts
 
 Regions flagged with `chrom_changed=YES` or non-zero `delta_length` deserve
 manual review. Unmapped regions include the failure reason from liftOver.
+
+The JSON companion (`ucr_liftover_audit_summary.json`) captures the same
+high-level audit metrics in machine-readable form:
+total/mapped/unmapped counts, mapping rate, unmapped reason histogram,
+delta-length min/max/mean, and input file hashes.
 
 ## Alignment report
 

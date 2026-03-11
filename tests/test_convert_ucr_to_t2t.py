@@ -11,6 +11,7 @@ Covers:
 """
 
 import csv
+import json
 import os
 import re
 import stat
@@ -288,6 +289,7 @@ class TestGenerateAuditReport:
         t2t_bed = tmp_path / "ucr_t2t_chm13.bed"
         unmapped_bed = tmp_path / "ucr_unmapped.bed"
         audit = tmp_path / "ucr_liftover_audit.tsv"
+        audit_summary = tmp_path / "ucr_liftover_audit_summary.json"
         ultras_bb = tmp_path / "hg38.ultraConserved.bb"
 
         # Copy the real bigBed so sha256sum() works
@@ -311,18 +313,20 @@ class TestGenerateAuditReport:
         monkeypatch.setattr(uct, "T2T_BED", str(t2t_bed))
         monkeypatch.setattr(uct, "UNMAPPED_BED", str(unmapped_bed))
         monkeypatch.setattr(uct, "AUDIT_REPORT", str(audit))
+        monkeypatch.setattr(uct, "AUDIT_SUMMARY_JSON", str(audit_summary))
         monkeypatch.setattr(uct, "ULTRAS_BB_FILE", str(ultras_bb))
         monkeypatch.setattr(uct, "CHAIN_FILE", str(ultras_bb))  # any real file for sha256
 
-        return audit
+        return audit, audit_summary
 
     def test_audit_file_created(self, tmp_path, monkeypatch):
-        audit = self._setup(tmp_path, monkeypatch)
+        audit, audit_summary = self._setup(tmp_path, monkeypatch)
         uct.generate_audit_report(None)
         assert audit.exists()
+        assert audit_summary.exists()
 
     def test_audit_mapped_count(self, tmp_path, monkeypatch):
-        audit = self._setup(tmp_path, monkeypatch)
+        audit, _ = self._setup(tmp_path, monkeypatch)
         uct.generate_audit_report(None)
 
         rows = [r for r in csv.DictReader(
@@ -335,7 +339,7 @@ class TestGenerateAuditReport:
         assert len(unmapped) == 1
 
     def test_audit_delta_length(self, tmp_path, monkeypatch):
-        audit = self._setup(tmp_path, monkeypatch)
+        audit, _ = self._setup(tmp_path, monkeypatch)
         uct.generate_audit_report(None)
 
         rows = {r["ucr_id"]: r for r in csv.DictReader(
@@ -353,7 +357,7 @@ class TestGenerateAuditReport:
         assert rows["100"]["reason"] == "Deleted in new"
 
     def test_audit_contains_provenance_header(self, tmp_path, monkeypatch):
-        audit = self._setup(tmp_path, monkeypatch)
+        audit, _ = self._setup(tmp_path, monkeypatch)
         uct.generate_audit_report(None)
 
         text = audit.read_text()
@@ -364,13 +368,24 @@ class TestGenerateAuditReport:
         assert "T2T-CHM13" in text
 
     def test_audit_summary_footer(self, tmp_path, monkeypatch):
-        audit = self._setup(tmp_path, monkeypatch)
+        audit, _ = self._setup(tmp_path, monkeypatch)
         uct.generate_audit_report(None)
 
         text = audit.read_text()
         assert "SUMMARY" in text
         assert "Mapped:" in text
         assert "Unmapped:" in text
+        assert "Unmapped reason counts:" in text
+
+    def test_audit_summary_json_contains_reason_counts(self, tmp_path, monkeypatch):
+        _, audit_summary = self._setup(tmp_path, monkeypatch)
+        uct.generate_audit_report(None)
+
+        payload = json.loads(audit_summary.read_text())
+        assert payload["counts"]["total"] == 3
+        assert payload["counts"]["mapped"] == 2
+        assert payload["counts"]["unmapped"] == 1
+        assert payload["unmapped_reason_counts"]["Deleted in new"] == 1
 
 
 # ===========================================================================
@@ -418,6 +433,7 @@ class TestFullPipelineSmoke:
         ultras_bb.write_bytes(b"bb")
 
         audit_path = tmp_path / "ucr_liftover_audit.tsv"
+        audit_summary_path = tmp_path / "ucr_liftover_audit_summary.json"
 
         monkeypatch.setattr(uct, "BIGBEDTOBED_BIN", str(bigbed))
         monkeypatch.setattr(uct, "ULTRAS_BB_FILE", str(ultras_bb))
@@ -426,6 +442,7 @@ class TestFullPipelineSmoke:
         monkeypatch.setattr(uct, "T2T_BED", str(tmp_path / "ucr_t2t_chm13.bed"))
         monkeypatch.setattr(uct, "UNMAPPED_BED", str(tmp_path / "ucr_unmapped.bed"))
         monkeypatch.setattr(uct, "AUDIT_REPORT", str(audit_path))
+        monkeypatch.setattr(uct, "AUDIT_SUMMARY_JSON", str(audit_summary_path))
         monkeypatch.setattr(uct, "LIFTOVER_BIN", str(stub))
         monkeypatch.setattr(uct, "CHAIN_FILE", str(chain))
 
@@ -436,6 +453,7 @@ class TestFullPipelineSmoke:
         assert os.path.exists(uct.HG38_BED)
         assert os.path.exists(uct.T2T_BED)
         assert audit_path.exists()
+        assert audit_summary_path.exists()
 
     def test_pipeline_all_regions_mapped(self, tmp_path, monkeypatch):
         """With the passthrough stub, every extracted UCR must appear as MAPPED."""
@@ -460,6 +478,7 @@ class TestFullPipelineSmoke:
         ultras_bb.write_bytes(b"bb")
 
         audit_path = tmp_path / "ucr_liftover_audit.tsv"
+        audit_summary_path = tmp_path / "ucr_liftover_audit_summary.json"
 
         monkeypatch.setattr(uct, "BIGBEDTOBED_BIN", str(bigbed))
         monkeypatch.setattr(uct, "ULTRAS_BB_FILE", str(ultras_bb))
@@ -468,6 +487,7 @@ class TestFullPipelineSmoke:
         monkeypatch.setattr(uct, "T2T_BED", str(tmp_path / "ucr_t2t_chm13.bed"))
         monkeypatch.setattr(uct, "UNMAPPED_BED", str(tmp_path / "ucr_unmapped.bed"))
         monkeypatch.setattr(uct, "AUDIT_REPORT", str(audit_path))
+        monkeypatch.setattr(uct, "AUDIT_SUMMARY_JSON", str(audit_summary_path))
         monkeypatch.setattr(uct, "LIFTOVER_BIN", str(stub))
         monkeypatch.setattr(uct, "CHAIN_FILE", str(chain))
 

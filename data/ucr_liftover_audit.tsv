@@ -1,10 +1,10 @@
 ## UCR Liftover Audit Report
 ## Generated: 2026-03-10T23:43:02.785543+00:00
-## Source: Giacopuzzi et al. 2020 (PMC6857462) Supplementary Table S1
+## Source: UCSC unusualcons/ultras table (legacy artifact generated before source migration)
 ## Source assembly: GRCh38 / hg38
 ## Target assembly: T2T-CHM13v2.0 / Hs1
 ## Chain file: hg38ToHs1.over.chain.gz
-## Excel SHA-256: 5e60db957711d88985d6452fa9402c9de0eba8d8579d62becb8a7502b77bd625
+## UCSC ultras bigBed SHA-256: unavailable in legacy artifact
 ## Chain SHA-256: 926d4583eda8f90c88434293859b06906573f2469630e898b8b475ac8751327a
 ##
 ucr_id	hg38_chrom	hg38_start	hg38_end	hg38_length	status	t2t_chrom	t2t_start	t2t_end	t2t_length	delta_length	delta_start	chrom_changed	reason

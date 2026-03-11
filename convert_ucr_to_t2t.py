@@ -1,10 +1,12 @@
 import os
 import sys
 import csv
+import json
 import hashlib
 import urllib.request
 import subprocess
 import datetime
+from collections import Counter
 import pandas as pd
 import stat
 
@@ -20,7 +22,7 @@ CHAIN_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHs1.
 # --- Path resolution ---
 # The liftOver binary is baked into the container image alongside the script.
 # When running outside a container it is downloaded into OUTPUT_DIR on first run.
-# Large data files (chain file, Excel) always download at runtime into OUTPUT_DIR.
+# Large data files (chain file, ultras bigBed) download at runtime into OUTPUT_DIR.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", os.getcwd())
 
@@ -51,6 +53,7 @@ HG38_BED = os.path.join(OUTPUT_DIR, "ucr_hg38.bed")
 T2T_BED = os.path.join(OUTPUT_DIR, "ucr_t2t_chm13.bed")
 UNMAPPED_BED = os.path.join(OUTPUT_DIR, "ucr_unmapped.bed")
 AUDIT_REPORT = os.path.join(OUTPUT_DIR, "ucr_liftover_audit.tsv")
+AUDIT_SUMMARY_JSON = os.path.join(OUTPUT_DIR, "ucr_liftover_audit_summary.json")
 
 
 def sha256sum(filepath):
@@ -216,6 +219,9 @@ def generate_audit_report(hg38_df):
     unmapped_count = 0
     chrom_change_count = 0
     size_change_count = 0
+    delta_lengths = []
+    delta_length_total = 0
+    unmapped_reason_counts = Counter()
 
     with open(AUDIT_REPORT, 'w', newline='') as fh:
         writer = csv.writer(fh, delimiter='\t')
@@ -256,6 +262,8 @@ def generate_audit_report(hg38_df):
                     chrom_change_count += 1
                 if delta_len != 0:
                     size_change_count += 1
+                delta_lengths.append(delta_len)
+                delta_length_total += delta_len
 
                 writer.writerow([
                     name,
@@ -269,6 +277,7 @@ def generate_audit_report(hg38_df):
                 mapped_count += 1
             else:
                 reason = unmapped_reasons.get(name, 'Unknown')
+                unmapped_reason_counts[reason or "Unknown"] += 1
                 writer.writerow([
                     name,
                     region['chrom'], region['start'], region['end'], hg38_len,
@@ -290,8 +299,44 @@ def generate_audit_report(hg38_df):
         fh.write(f"## Chromosome changed:   {chrom_change_count}\n")
         fh.write(f"## Size changed:         {size_change_count}\n")
         fh.write(f"## Mapping rate:         {mapped_count/total*100:.1f}%\n" if total > 0 else "")
+        if unmapped_reason_counts:
+            fh.write(f"## Unmapped reason counts:\n")
+            for reason, count in unmapped_reason_counts.most_common():
+                fh.write(f"##   {reason}: {count}\n")
 
     print(f"Audit report written ({mapped_count} mapped, {unmapped_count} unmapped)")
+
+    summary_payload = {
+        "generated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "source": "UCSC unusualcons/ultras table (hg38.ultraConserved.bb)",
+        "source_assembly": "GRCh38/hg38",
+        "target_assembly": "T2T-CHM13v2.0/Hs1",
+        "input_hashes": {
+            "ultras_bigbed_sha256": sha256sum(ULTRAS_BB_FILE),
+            "chain_sha256": sha256sum(CHAIN_FILE),
+        },
+        "counts": {
+            "total": total,
+            "mapped": mapped_count,
+            "unmapped": unmapped_count,
+            "chromosome_changed": chrom_change_count,
+            "size_changed": size_change_count,
+        },
+        "mapping_rate_percent": round((mapped_count / total) * 100, 3) if total else 0.0,
+        "delta_length_bp": {
+            "min": min(delta_lengths) if delta_lengths else 0,
+            "max": max(delta_lengths) if delta_lengths else 0,
+            "mean": (delta_length_total / len(delta_lengths)) if delta_lengths else 0.0,
+        },
+        "unmapped_reason_counts": dict(unmapped_reason_counts),
+        "audit_files": {
+            "per_region_tsv": AUDIT_REPORT,
+            "summary_json": AUDIT_SUMMARY_JSON,
+        },
+    }
+    with open(AUDIT_SUMMARY_JSON, "w") as fh:
+        json.dump(summary_payload, fh, indent=2, sort_keys=True)
+    print(f"Audit summary JSON written → {AUDIT_SUMMARY_JSON}")
 
     # Print summary to stdout as well
     print(f"\n{'='*50}")
