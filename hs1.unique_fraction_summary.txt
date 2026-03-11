@@ -1,9 +1,0 @@
-Assembly: hs1
-Metric: strict unique mappability fraction by k-mer
-Numerator: union bp at maximal score per track when scores vary; otherwise binary interval union.
-Denominator: total bp in selected chrom.sizes set.
-
-k-mer summary:
-  k=24: 13.300000% (unique_bp=40, genome_bp=300)
-
-Pairwise change vs previous k:

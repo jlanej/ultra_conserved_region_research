@@ -1,2 +1,0 @@
-assembly	kmer	unique_bp	genome_bp	fraction_unique	percent_unique	strict_unique_filter_applied
-hs1	24	40	300	0.133	13.3	False
