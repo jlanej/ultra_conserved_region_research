@@ -270,7 +270,7 @@ def write_summary(rows, chrom_rows=None):
                 row["delta_percent_from_previous_k"],
             ])
 
-    if chrom_rows:
+    if chrom_rows is not None:
         with open(CHROM_SUMMARY_TSV, "w", newline="") as fh:
             writer = csv.writer(fh, delimiter="\t")
             writer.writerow([
