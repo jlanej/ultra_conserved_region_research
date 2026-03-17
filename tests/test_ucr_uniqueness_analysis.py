@@ -487,3 +487,259 @@ class TestLitmusControl:
         payload = json.loads(path.read_text())
         assert payload["litmus_test"]["overall_passed"] is False
         assert payload["litmus_test"]["per_kmer"]["24"]["passed"] is False
+
+
+# ===========================================================================
+# 11. NON_UNIQUE_FRACTION_THRESHOLD constant
+# ===========================================================================
+
+
+class TestNonUniqueFractionThreshold:
+    """Sanity checks for the 10 % non-unique threshold constant."""
+
+    def test_threshold_value(self):
+        assert ua.NON_UNIQUE_FRACTION_THRESHOLD == 0.10
+
+    def test_threshold_in_range(self):
+        assert 0.0 < ua.NON_UNIQUE_FRACTION_THRESHOLD < 1.0
+
+
+# ===========================================================================
+# 12. write_non_unique_query_fasta()
+# ===========================================================================
+
+
+class TestWriteNonUniqueQueryFasta:
+    """Unit tests for FASTA writer used by the locus-mapping step."""
+
+    def _make_row(self, ucr_id, kmer, nu_fraction, nu_intervals,
+                  chrom="chr1", ucr_start=1000, ucr_seq="A" * 300):
+        return {
+            "ucr_id": ucr_id,
+            "kmer": kmer,
+            "t2t_chrom": chrom,
+            "t2t_start": ucr_start,
+            "t2t_end": ucr_start + len(ucr_seq),
+            "non_unique_fraction": nu_fraction,
+            "non_unique_intervals": nu_intervals,
+        }
+
+    def test_writes_above_threshold(self, tmp_path):
+        fa = tmp_path / "q.fa"
+        seq = "ACGT" * 75  # 300 bp
+        rows = [
+            self._make_row("42", 24, 0.50, [(1050, 1100)], ucr_seq=seq),
+        ]
+        ucr_seqs = {"42": seq}
+        count = ua.write_non_unique_query_fasta(rows, ucr_seqs, str(fa))
+        assert count == 1
+        text = fa.read_text()
+        assert "NUQUERY|42|k24|chr1|1050|1100" in text
+
+    def test_skips_below_threshold(self, tmp_path):
+        fa = tmp_path / "q.fa"
+        seq = "ACGT" * 75
+        rows = [
+            self._make_row("42", 24, 0.05, [(1050, 1100)], ucr_seq=seq),
+        ]
+        ucr_seqs = {"42": seq}
+        count = ua.write_non_unique_query_fasta(rows, ucr_seqs, str(fa))
+        assert count == 0
+        assert fa.read_text() == ""
+
+    def test_skips_very_short_intervals(self, tmp_path):
+        fa = tmp_path / "q.fa"
+        seq = "ACGT" * 75
+        # non_unique interval only 5 bp long – below _MIN_NU_QUERY_LEN
+        rows = [
+            self._make_row("42", 24, 0.50, [(1050, 1055)], ucr_seq=seq),
+        ]
+        ucr_seqs = {"42": seq}
+        count = ua.write_non_unique_query_fasta(rows, ucr_seqs, str(fa))
+        assert count == 0
+
+    def test_skips_litmus_control(self, tmp_path):
+        fa = tmp_path / "q.fa"
+        seq = "ACGT" * 75
+        rows = [
+            self._make_row(ua.LITMUS_CONTROL_ID, 24, 0.90, [(1050, 1200)],
+                           ucr_seq=seq),
+        ]
+        ucr_seqs = {ua.LITMUS_CONTROL_ID: seq}
+        count = ua.write_non_unique_query_fasta(rows, ucr_seqs, str(fa))
+        assert count == 0
+
+    def test_multiple_intervals_and_ucrs(self, tmp_path):
+        fa = tmp_path / "q.fa"
+        seq = "ACGT" * 75
+        rows = [
+            self._make_row("42", 24, 0.50,
+                           [(1050, 1100), (1150, 1200)], ucr_seq=seq),
+            self._make_row("99", 36, 0.30,
+                           [(1060, 1130)], ucr_seq=seq),
+        ]
+        ucr_seqs = {"42": seq, "99": seq}
+        count = ua.write_non_unique_query_fasta(rows, ucr_seqs, str(fa))
+        assert count == 3
+        text = fa.read_text()
+        assert "NUQUERY|42|k24|chr1|1050|1100" in text
+        assert "NUQUERY|42|k24|chr1|1150|1200" in text
+        assert "NUQUERY|99|k36|chr1|1060|1130" in text
+
+
+# ===========================================================================
+# 13. parse_paf()
+# ===========================================================================
+
+
+class TestParsePaf:
+    """Unit tests for PAF parser."""
+
+    def _paf_line(self, query="NUQUERY|42|k24|chr1|1000|1200",
+                  qlen=200, qstart=0, qend=200,
+                  strand="+", tname="chr1", tlen=248387497,
+                  tstart=999, tend=1200, matches=200, alen=201, mapq=60):
+        return "\t".join(str(x) for x in [
+            query, qlen, qstart, qend, strand,
+            tname, tlen, tstart, tend, matches, alen, mapq,
+        ])
+
+    def test_basic_parsing(self, tmp_path):
+        paf = tmp_path / "test.paf"
+        paf.write_text(self._paf_line() + "\n")
+        records = ua.parse_paf(str(paf))
+        assert len(records) == 1
+        r = records[0]
+        assert r["query_name"] == "NUQUERY|42|k24|chr1|1000|1200"
+        assert r["query_len"] == 200
+        assert r["hit_chrom"] == "chr1"
+        assert r["hit_start"] == 999
+        assert r["hit_end"] == 1200
+        assert r["match_bp"] == 200
+        assert r["align_len"] == 201
+        assert r["mapq"] == 60
+        assert r["strand"] == "+"
+
+    def test_multiple_hits(self, tmp_path):
+        paf = tmp_path / "test.paf"
+        paf.write_text(
+            self._paf_line(tname="chr1") + "\n"
+            + self._paf_line(tname="chr5", tstart=5000, tend=5200, mapq=30)
+            + "\n"
+        )
+        records = ua.parse_paf(str(paf))
+        assert len(records) == 2
+        assert records[1]["hit_chrom"] == "chr5"
+        assert records[1]["mapq"] == 30
+
+    def test_short_lines_skipped(self, tmp_path):
+        paf = tmp_path / "test.paf"
+        paf.write_text("col1\tcol2\tcol3\n")  # only 3 cols, needs 12
+        records = ua.parse_paf(str(paf))
+        assert records == []
+
+    def test_empty_file(self, tmp_path):
+        paf = tmp_path / "empty.paf"
+        paf.write_text("")
+        assert ua.parse_paf(str(paf)) == []
+
+    def test_missing_file(self, tmp_path):
+        assert ua.parse_paf(str(tmp_path / "nonexistent.paf")) == []
+
+
+# ===========================================================================
+# 14. write_non_unique_loci_report()
+# ===========================================================================
+
+
+class TestWriteNonUniqueLociReport:
+    """Unit tests for the locus mapping TSV writer."""
+
+    def _make_paf_record(self, query="NUQUERY|42|k24|chr1|1000|1200",
+                          query_len=200, hit_chrom="chr1",
+                          hit_start=999, hit_end=1200, strand="+",
+                          match_bp=200, align_len=201, mapq=60):
+        return {
+            "query_name": query,
+            "query_len": query_len,
+            "hit_chrom": hit_chrom,
+            "hit_start": hit_start,
+            "hit_end": hit_end,
+            "strand": strand,
+            "match_bp": match_bp,
+            "align_len": align_len,
+            "mapq": mapq,
+        }
+
+    def test_basic_output_format(self, tmp_path):
+        path = tmp_path / "loci.tsv"
+        records = [self._make_paf_record()]
+        nu_frac_map = {("42", 24): 0.50}
+        ua.write_non_unique_loci_report(str(path), records, nu_frac_map)
+
+        text = path.read_text()
+        assert "## UCR Non-Unique Locus Mapping Report" in text
+
+        data_rows = list(csv.DictReader(
+            (l for l in text.splitlines() if not l.startswith("##")),
+            delimiter="\t",
+        ))
+        assert len(data_rows) == 1
+        row = data_rows[0]
+        assert row["ucr_id"] == "42"
+        assert row["kmer"] == "24"
+        assert row["nu_interval"] == "chr1:1000-1200"
+        assert row["hit_chrom"] == "chr1"
+        assert row["is_self_locus"] == "YES"
+
+    def test_off_target_locus_marked_no(self, tmp_path):
+        path = tmp_path / "loci.tsv"
+        # Hit on a completely different chromosome
+        records = [self._make_paf_record(
+            hit_chrom="chr5", hit_start=5000, hit_end=5200,
+        )]
+        nu_frac_map = {("42", 24): 0.50}
+        ua.write_non_unique_loci_report(str(path), records, nu_frac_map)
+
+        data_rows = list(csv.DictReader(
+            (l for l in path.read_text().splitlines()
+             if not l.startswith("##")),
+            delimiter="\t",
+        ))
+        assert data_rows[0]["is_self_locus"] == "NO"
+        assert data_rows[0]["hit_chrom"] == "chr5"
+
+    def test_identity_computed_correctly(self, tmp_path):
+        path = tmp_path / "loci.tsv"
+        records = [self._make_paf_record(match_bp=180, align_len=200)]
+        nu_frac_map = {("42", 24): 0.25}
+        ua.write_non_unique_loci_report(str(path), records, nu_frac_map)
+        data_rows = list(csv.DictReader(
+            (l for l in path.read_text().splitlines()
+             if not l.startswith("##")),
+            delimiter="\t",
+        ))
+        assert abs(float(data_rows[0]["identity"]) - 0.9) < 1e-5
+
+    def test_invalid_query_name_skipped(self, tmp_path):
+        path = tmp_path / "loci.tsv"
+        bad_rec = self._make_paf_record(query="BADFORMAT_nodelimiters")
+        ua.write_non_unique_loci_report(str(path), [bad_rec], {})
+        data_rows = list(csv.DictReader(
+            (l for l in path.read_text().splitlines()
+             if not l.startswith("##")),
+            delimiter="\t",
+        ))
+        assert len(data_rows) == 0
+
+    def test_empty_records(self, tmp_path):
+        path = tmp_path / "loci.tsv"
+        ua.write_non_unique_loci_report(str(path), [], {})
+        text = path.read_text()
+        assert "## UCR Non-Unique Locus Mapping Report" in text
+        data_rows = list(csv.DictReader(
+            (l for l in text.splitlines() if not l.startswith("##")),
+            delimiter="\t",
+        ))
+        assert len(data_rows) == 0
+

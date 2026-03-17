@@ -279,6 +279,7 @@ apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_r
 |---|---|
 | `ucr_uniqueness_report.tsv` | Per-region, per-kmer uniqueness metrics with full UCR and non-unique sequences |
 | `ucr_uniqueness_summary.json` | Overall pipeline summary including validation and per-kmer aggregates |
+| `ucr_non_unique_loci.tsv` | All genomic loci matched by non-unique sub-intervals (UCRs with >10% non-unique sequence; requires `minimap2`) |
 | *(plus all liftover and validation output files listed above)* | |
 
 `ucr_uniqueness_report.tsv` columns:
@@ -298,6 +299,27 @@ apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_r
 | `non_unique_fraction` | `non_unique_bp / ucr_length` (0–1). |
 | `ucr_sequence` | Full T2T UCR nucleotide sequence. |
 | `non_unique_sequence` | Concatenated bases at non-unique positions within the UCR. Empty if the entire UCR is uniquely mappable at that k-mer size. |
+
+`ucr_non_unique_loci.tsv` columns (produced when any UCR has `non_unique_fraction > 10%`):
+
+| Column | Meaning |
+|---|---|
+| `ucr_id` | UCR region identifier. |
+| `kmer` | K-mer size used to identify the non-unique sub-interval. |
+| `non_unique_fraction` | `non_unique_bp / ucr_length` for this (UCR, k-mer) pair. |
+| `nu_interval` | Genomic coordinates of the non-unique sub-interval within the UCR (`chrom:start-end`). |
+| `nu_seq_len` | Length of the non-unique query sequence (bp). |
+| `hit_chrom` | Chromosome of the minimap2 alignment hit. |
+| `hit_start` | Start coordinate of the alignment hit (0-based). |
+| `hit_end` | End coordinate of the alignment hit (half-open). |
+| `strand` | Alignment strand (`+` or `-`). |
+| `match_bp` | Number of matching base pairs in the alignment. |
+| `align_len` | Total alignment block length (bp). |
+| `identity` | `match_bp / align_len` (0–1). |
+| `mapq` | Mapping quality score from minimap2. |
+| `is_self_locus` | `YES` if the hit overlaps the original non-unique interval (expected self-hit); `NO` for off-target loci that explain the non-uniqueness. |
+
+Sorting `ucr_non_unique_loci.tsv` by `ucr_id`, `kmer`, `nu_interval` groups all loci for each non-unique region together, making it straightforward to compare all locations matched by the same non-unique sequence.
 
 `ucr_uniqueness_summary.json` structure:
 

@@ -27,6 +27,7 @@ import csv
 import datetime
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -57,6 +58,10 @@ LITMUS_CONTROL_REGION = {
 # failure.  Alpha-satellite HORs are so highly repetitive that even a
 # permissive 5 % threshold should never be reached.
 LITMUS_MAX_UNIQUE_FRACTION = 0.05
+
+# Fraction of non-unique sequence above which a UCR's non-unique sub-intervals
+# are mapped back to the reference genome to identify all matching loci.
+NON_UNIQUE_FRACTION_THRESHOLD = 0.10
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -332,7 +337,294 @@ def extract_non_unique_seq(ucr_start, ucr_sequence, non_unique_intervals):
     return "".join(parts)
 
 
-# ────────────── Validation results loader ─────────────────────────────
+# ─────────── Non-unique locus mapping ─────────────────────────────────
+
+# Minimum interval length (bp) to include as a minimap2 query.
+# Shorter fragments provide poor mapping specificity.
+_MIN_NU_QUERY_LEN = 20
+
+
+def find_minimap2():
+    """Return the path to the ``minimap2`` binary, or ``None`` if not found."""
+    return shutil.which("minimap2")
+
+
+def write_non_unique_query_fasta(per_region_rows, ucr_seqs, fasta_path,
+                                  threshold=NON_UNIQUE_FRACTION_THRESHOLD):
+    """Write a FASTA file of non-unique sub-intervals for UCRs above threshold.
+
+    Each record ID encodes source metadata so PAF hits can be linked back:
+    ``NUQUERY|{ucr_id}|k{kmer}|{chrom}|{iv_start}|{iv_end}``
+
+    Only (ucr_id, kmer) pairs where ``non_unique_fraction > threshold`` and
+    the interval is at least ``_MIN_NU_QUERY_LEN`` bp are included.
+
+    Parameters
+    ----------
+    per_region_rows : list of dict
+        Per-region rows from the k-mer analysis (must contain
+        ``non_unique_intervals`` key).
+    ucr_seqs : dict
+        ``{ucr_id: sequence}`` from the T2T FASTA.
+    fasta_path : str
+        Output FASTA path.
+    threshold : float
+        Minimum ``non_unique_fraction`` for a UCR to be included.
+
+    Returns
+    -------
+    int
+        Number of query sequences written.
+    """
+    count = 0
+    with open(fasta_path, "w") as fh:
+        for row in per_region_rows:
+            if row["ucr_id"] == LITMUS_CONTROL_ID:
+                continue
+            if row.get("non_unique_fraction", 0.0) <= threshold:
+                continue
+            ucr_id = row["ucr_id"]
+            k = row["kmer"]
+            chrom = row["t2t_chrom"]
+            ucr_start = row["t2t_start"]
+            ucr_seq = ucr_seqs.get(ucr_id, "")
+            if not ucr_seq:
+                continue
+            for iv_start, iv_end in row.get("non_unique_intervals", []):
+                rel_s = iv_start - ucr_start
+                rel_e = iv_end - ucr_start
+                seq = ucr_seq[rel_s:rel_e]
+                if len(seq) < _MIN_NU_QUERY_LEN:
+                    continue
+                rec_id = (
+                    f"NUQUERY|{ucr_id}|k{k}|{chrom}|{iv_start}|{iv_end}"
+                )
+                fh.write(f">{rec_id}\n{seq}\n")
+                count += 1
+    return count
+
+
+def run_minimap2(twobittofa_bin, hs1_2bit, minimap2_bin,
+                  query_fa, paf_out):
+    """Map non-unique query sequences against hs1 using minimap2.
+
+    The reference genome is streamed from *hs1_2bit* via ``twoBitToFa``
+    to avoid storing an extra ~3.1 GB FASTA file.  Secondary alignments
+    are requested so that all genomic loci matching each query are
+    reported (up to 50 per query).
+
+    Parameters
+    ----------
+    twobittofa_bin : str
+        Path to the ``twoBitToFa`` binary.
+    hs1_2bit : str
+        Path to the ``hs1.2bit`` reference genome file.
+    minimap2_bin : str
+        Path to the ``minimap2`` binary.
+    query_fa : str
+        FASTA file of non-unique query sequences to map.
+    paf_out : str
+        Output PAF file path.
+    """
+    twobittofa_cmd = [twobittofa_bin, hs1_2bit, "stdout"]
+    minimap2_cmd = [
+        minimap2_bin,
+        "-c",              # output CIGAR strings in PAF
+        "--secondary=yes", # report secondary alignments (the off-target loci)
+        "-N", "50",        # up to 50 secondary alignments per query
+        "-x", "asm5",      # preset for highly similar sequences (<5 % div)
+        "-",               # reference from stdin
+        query_fa,
+    ]
+    with open(paf_out, "w") as paf_fh:
+        twobittofa_proc = subprocess.Popen(
+            twobittofa_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        minimap2_proc = subprocess.Popen(
+            minimap2_cmd,
+            stdin=twobittofa_proc.stdout,
+            stdout=paf_fh,
+            stderr=subprocess.PIPE,
+        )
+        twobittofa_proc.stdout.close()
+        _, mm2_stderr = minimap2_proc.communicate()
+        twobittofa_proc.wait()
+    if minimap2_proc.returncode != 0:
+        print(
+            f"minimap2 stderr:\n{mm2_stderr.decode(errors='replace')}",
+            file=sys.stderr,
+        )
+        raise RuntimeError(
+            f"minimap2 exited with code {minimap2_proc.returncode}"
+        )
+
+
+def parse_paf(paf_path):
+    """Parse a PAF (Pairwise Alignment Format) file into a list of dicts.
+
+    Returns one dict per alignment line with the fields used by
+    :func:`write_non_unique_loci_report`.  Lines with fewer than 12
+    tab-separated columns are silently skipped.
+
+    Parameters
+    ----------
+    paf_path : str
+        Path to the PAF file produced by minimap2.
+
+    Returns
+    -------
+    list of dict
+        Alignment records with keys: ``query_name``, ``query_len``,
+        ``query_start``, ``query_end``, ``strand``, ``hit_chrom``,
+        ``hit_start``, ``hit_end``, ``match_bp``, ``align_len``, ``mapq``.
+    """
+    records = []
+    if not os.path.exists(paf_path):
+        return records
+    with open(paf_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            cols = line.split("\t")
+            if len(cols) < 12:
+                continue
+            try:
+                records.append({
+                    "query_name":  cols[0],
+                    "query_len":   int(cols[1]),
+                    "query_start": int(cols[2]),
+                    "query_end":   int(cols[3]),
+                    "strand":      cols[4],
+                    "hit_chrom":   cols[5],
+                    "hit_start":   int(cols[7]),
+                    "hit_end":     int(cols[8]),
+                    "match_bp":    int(cols[9]),
+                    "align_len":   int(cols[10]),
+                    "mapq":        int(cols[11]),
+                })
+            except (ValueError, IndexError):
+                continue
+    return records
+
+
+def _parse_nu_query_name(query_name):
+    """Parse an encoded non-unique query record ID back to its components.
+
+    Expected format: ``NUQUERY|{ucr_id}|k{kmer}|{chrom}|{iv_start}|{iv_end}``
+
+    Returns
+    -------
+    tuple of (str, int, str, int, int)
+        ``(ucr_id, kmer, chrom, iv_start, iv_end)``
+
+    Raises
+    ------
+    ValueError
+        If *query_name* does not match the expected format.
+    """
+    parts = query_name.split("|")
+    if len(parts) != 6 or parts[0] != "NUQUERY":
+        raise ValueError(f"Unexpected query name format: {query_name!r}")
+    ucr_id = parts[1]
+    kmer = int(parts[2].lstrip("k"))
+    chrom = parts[3]
+    iv_start = int(parts[4])
+    iv_end = int(parts[5])
+    return ucr_id, kmer, chrom, iv_start, iv_end
+
+
+def write_non_unique_loci_report(path, paf_records, nu_frac_map):
+    """Write an intuitive TSV report of all loci matching non-unique sequences.
+
+    Each row represents one minimap2 alignment hit for one non-unique
+    sub-interval of one UCR.  The ``is_self_locus`` column is ``YES`` when
+    the hit overlaps the original non-unique interval (expected self-hit)
+    and ``NO`` for hits at other genomic locations (the informative ones).
+
+    Parameters
+    ----------
+    path : str
+        Output TSV path.
+    paf_records : list of dict
+        Parsed PAF records from :func:`parse_paf`.
+    nu_frac_map : dict
+        ``{(ucr_id, kmer): non_unique_fraction}`` – used to annotate rows.
+    """
+    fields = [
+        "ucr_id",
+        "kmer",
+        "non_unique_fraction",
+        "nu_interval",
+        "nu_seq_len",
+        "hit_chrom",
+        "hit_start",
+        "hit_end",
+        "strand",
+        "match_bp",
+        "align_len",
+        "identity",
+        "mapq",
+        "is_self_locus",
+    ]
+    with open(path, "w", newline="") as fh:
+        fh.write("## UCR Non-Unique Locus Mapping Report\n")
+        fh.write(
+            f"## Generated: "
+            f"{datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+        )
+        fh.write("## Assembly: T2T-CHM13v2.0 (hs1)\n")
+        fh.write(
+            f"## Threshold: non_unique_fraction > "
+            f"{NON_UNIQUE_FRACTION_THRESHOLD:.0%}\n"
+        )
+        fh.write(
+            "## Tool: minimap2 -x asm5 --secondary=yes -N 50\n"
+        )
+        fh.write(
+            "## is_self_locus: YES = hit overlaps the query's own "
+            "non-unique interval; NO = off-target locus\n"
+        )
+        fh.write("##\n")
+        writer = csv.DictWriter(fh, fieldnames=fields, delimiter="\t")
+        writer.writeheader()
+        for rec in paf_records:
+            try:
+                ucr_id, kmer, chrom, iv_start, iv_end = (
+                    _parse_nu_query_name(rec["query_name"])
+                )
+            except ValueError:
+                continue
+            nu_fraction = nu_frac_map.get((ucr_id, kmer), 0.0)
+            identity = (
+                round(rec["match_bp"] / rec["align_len"], 6)
+                if rec["align_len"] else 0.0
+            )
+            is_self = (
+                rec["hit_chrom"] == chrom
+                and rec["hit_start"] < iv_end
+                and rec["hit_end"] > iv_start
+            )
+            writer.writerow({
+                "ucr_id":              ucr_id,
+                "kmer":                kmer,
+                "non_unique_fraction": f"{nu_fraction:.6f}",
+                "nu_interval":         f"{chrom}:{iv_start}-{iv_end}",
+                "nu_seq_len":          rec["query_len"],
+                "hit_chrom":           rec["hit_chrom"],
+                "hit_start":           rec["hit_start"],
+                "hit_end":             rec["hit_end"],
+                "strand":              rec["strand"],
+                "match_bp":            rec["match_bp"],
+                "align_len":           rec["align_len"],
+                "identity":            f"{identity:.6f}",
+                "mapq":                rec["mapq"],
+                "is_self_locus":       "YES" if is_self else "NO",
+            })
+    print(f"  ✓ {os.path.basename(path)}")
+
 
 def load_validation_results(report_tsv):
     """Parse ``ucr_alignment_report.tsv`` → ``{ucr_id: {field: value}}``."""
@@ -635,6 +927,8 @@ def main():
 
             ucr_seq = ucr_seqs.get(ucr_id, "")
             non_unique_seq = ""
+            # Default to empty list; populated below when non-unique bases exist.
+            nu_intervals = []
             if non_unique_bp > 0 and ucr_seq:
                 nu_intervals = get_non_unique_intervals(
                     ucr_start, ucr_end, merged,
@@ -664,6 +958,8 @@ def main():
                 ),
                 "ucr_sequence": ucr_seq,
                 "non_unique_sequence": non_unique_seq,
+                # Not written to TSV (extrasaction="ignore"); used by Step 7.
+                "non_unique_intervals": nu_intervals,
             })
 
     # ── Step 7: Write reports ──
@@ -673,6 +969,76 @@ def main():
         summary_json, per_region_rows, validation, kmers,
         total_ucrs_lifted=len(ucr_coords),
     )
+
+    # ── Step 7: Non-unique locus mapping ──────────────────────────────────
+    print(f"\n═══ Step 7: Non-unique locus mapping "
+          f"(threshold > {NON_UNIQUE_FRACTION_THRESHOLD:.0%}) ═══")
+    loci_tsv = os.path.join(outdir, "ucr_non_unique_loci.tsv")
+    nu_query_fa = os.path.join(outdir, "ucr_non_unique_queries.fa")
+    nu_paf = os.path.join(outdir, "ucr_non_unique.paf")
+
+    minimap2_bin = find_minimap2()
+    if minimap2_bin is None:
+        print(
+            "  ⚠  minimap2 not found in PATH – skipping locus mapping.\n"
+            "     Install minimap2 (e.g. apt-get install minimap2) to enable."
+        )
+    else:
+        eligible = [
+            r for r in per_region_rows
+            if r["ucr_id"] != LITMUS_CONTROL_ID
+            and r.get("non_unique_fraction", 0.0) > NON_UNIQUE_FRACTION_THRESHOLD
+        ]
+        if not eligible:
+            print(
+                f"  No UCRs with non_unique_fraction > "
+                f"{NON_UNIQUE_FRACTION_THRESHOLD:.0%} – skipping."
+            )
+        else:
+            n_pairs = len(eligible)
+            print(
+                f"  {n_pairs} (ucr_id, kmer) combinations exceed the "
+                f"{NON_UNIQUE_FRACTION_THRESHOLD:.0%} threshold."
+            )
+            n_queries = write_non_unique_query_fasta(
+                eligible, ucr_seqs, nu_query_fa,
+            )
+            print(
+                f"  {n_queries} non-unique sub-intervals written to "
+                f"{os.path.basename(nu_query_fa)}"
+            )
+            if n_queries > 0:
+                print(
+                    "  Running minimap2 (reference streamed from hs1.2bit) …"
+                )
+                run_minimap2(
+                    twobittofa_bin, hs1_2bit, minimap2_bin,
+                    nu_query_fa, nu_paf,
+                )
+                paf_records = parse_paf(nu_paf)
+                off_target = 0
+                for r in paf_records:
+                    try:
+                        _, _, chrom, iv_start, iv_end = (
+                            _parse_nu_query_name(r["query_name"])
+                        )
+                        if not (
+                            r["hit_chrom"] == chrom
+                            and r["hit_start"] < iv_end
+                            and r["hit_end"] > iv_start
+                        ):
+                            off_target += 1
+                    except ValueError:
+                        pass
+                print(
+                    f"  {len(paf_records)} total alignment hits "
+                    f"({off_target} off-target / non-self loci)"
+                )
+                nu_frac_map = {
+                    (r["ucr_id"], r["kmer"]): r.get("non_unique_fraction", 0.0)
+                    for r in eligible
+                }
+                write_non_unique_loci_report(loci_tsv, paf_records, nu_frac_map)
 
     # ── Print summary to stdout ──
     ucr_rows_final = [
@@ -723,6 +1089,8 @@ def main():
     print(f"\n  Reports:")
     print(f"    {report_tsv}")
     print(f"    {summary_json}")
+    if minimap2_bin is not None and os.path.exists(loci_tsv):
+        print(f"    {loci_tsv}")
 
 
 if __name__ == "__main__":

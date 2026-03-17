@@ -5,6 +5,7 @@ RUN apt-get update && \
         wget \
         ca-certificates \
         libcurl4 \
+        minimap2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
