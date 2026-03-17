@@ -19,6 +19,7 @@ twoBitToFa
 *.over.chain.gz
 *.2bit
 *.sif
+hs1.unique_fraction_*
 
 # IDE
 .idea/

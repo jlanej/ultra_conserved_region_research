@@ -113,3 +113,30 @@ def test_build_comparison_rows():
     assert out[1]["delta_percent_from_previous_k"] == pytest.approx(10.0)
     assert out[1]["delta_fraction_from_previous_k"] == pytest.approx(0.1)
     assert out[2]["delta_percent_from_previous_k"] == pytest.approx(1.0)
+
+
+def test_write_summary_writes_chrom_summary_for_empty_chrom_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(cuf, "SUMMARY_TSV", str(tmp_path / "summary.tsv"))
+    monkeypatch.setattr(cuf, "COMPARISON_TSV", str(tmp_path / "comparison.tsv"))
+    monkeypatch.setattr(cuf, "CHROM_SUMMARY_TSV", str(tmp_path / "by_chrom.tsv"))
+    monkeypatch.setattr(cuf, "SUMMARY_TXT", str(tmp_path / "summary.txt"))
+
+    rows = [
+        {
+            "assembly": "hs1",
+            "kmer": 24,
+            "unique_bp": 40,
+            "genome_bp": 300,
+            "fraction_unique": 0.133333,
+            "percent_unique": 13.3333,
+            "strict_unique_filter_applied": False,
+        }
+    ]
+
+    cuf.write_summary(rows, chrom_rows=[])
+
+    chrom_summary = tmp_path / "by_chrom.tsv"
+    assert chrom_summary.exists()
+    assert chrom_summary.read_text().startswith(
+        "assembly\tkmer\tchromosome\tunique_bp\tgenome_bp\tfraction_unique\tpercent_unique\tstrict_unique_filter_applied\n"
+    )
