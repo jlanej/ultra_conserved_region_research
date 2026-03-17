@@ -39,6 +39,25 @@ from Bio import SeqIO
 ASSEMBLY = "hs1"
 DEFAULT_KMERS = (24, 36, 50, 100, 150, 250)
 
+# ── Litmus control ──────────────────────────────────────────────────────
+# A 1-kb window inside the chr1 alpha-satellite (centromeric HOR) array in
+# T2T-CHM13v2.0 (hs1).  Alpha-satellite monomers (~171 bp) repeat hundreds
+# of thousands of times, so no k-mer here can be uniquely mappable.  If the
+# pipeline reports any significant unique fraction for this region the
+# uniqueness methods should be considered suspect.
+# Reference: Nurk et al. 2022, Science 376(6588); UCSC hs1 centromere track.
+LITMUS_CONTROL_ID = "LITMUS_CONTROL"
+LITMUS_CONTROL_REGION = {
+    "chrom": "chr1",
+    "start": 122_000_000,
+    "end":   122_001_000,
+    "name":  LITMUS_CONTROL_ID,
+}
+# Fraction of litmus-control bases that may appear "unique" before we flag a
+# failure.  Alpha-satellite HORs are so highly repetitive that even a
+# permissive 5 % threshold should never be reached.
+LITMUS_MAX_UNIQUE_FRACTION = 0.05
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 HS1_2BIT_URL = (
@@ -367,10 +386,23 @@ def write_per_region_report(path, rows):
 
 def write_summary(path, per_region_rows, validation, kmers,
                    total_ucrs_lifted):
-    """Write overall uniqueness summary as JSON."""
+    """Write overall uniqueness summary as JSON.
+
+    The LITMUS_CONTROL region is excluded from aggregate UCR statistics so it
+    cannot inflate or deflate the per-UCR counts.  Its results are reported
+    separately under the ``litmus_test`` key.
+    """
+    # Separate real UCR rows from the litmus control rows.
+    ucr_rows = [
+        r for r in per_region_rows if r["ucr_id"] != LITMUS_CONTROL_ID
+    ]
+    litmus_rows = [
+        r for r in per_region_rows if r["ucr_id"] == LITMUS_CONTROL_ID
+    ]
+
     per_kmer = {}
     for k in kmers:
-        k_rows = [r for r in per_region_rows if r["kmer"] == k]
+        k_rows = [r for r in ucr_rows if r["kmer"] == k]
         total_ucr_bp = sum(r["ucr_length"] for r in k_rows)
         total_unique_bp = sum(r["unique_bp"] for r in k_rows)
         fully_unique = sum(
@@ -424,6 +456,32 @@ def write_summary(path, per_region_rows, validation, kmers,
         "per_kmer_summary": per_kmer,
         "validation": val_summary,
     }
+
+    # ── Litmus test summary ──────────────────────────────────────────────
+    if litmus_rows:
+        region = LITMUS_CONTROL_REGION
+        per_kmer_litmus = {
+            str(r["kmer"]): {
+                "unique_fraction": round(r["unique_fraction"], 6),
+                "passed": r["unique_fraction"] <= LITMUS_MAX_UNIQUE_FRACTION,
+            }
+            for r in litmus_rows
+        }
+        payload["litmus_test"] = {
+            "region": (
+                f"{region['chrom']}:{region['start']}-{region['end']}"
+            ),
+            "description": (
+                "chr1 alpha-satellite centromeric HOR array — "
+                "expected unique_fraction ≈ 0"
+            ),
+            "expected_unique_fraction_max": LITMUS_MAX_UNIQUE_FRACTION,
+            "per_kmer": per_kmer_litmus,
+            "overall_passed": all(
+                v["passed"] for v in per_kmer_litmus.values()
+            ),
+        }
+
     with open(path, "w") as fh:
         json.dump(payload, fh, indent=2)
     print(f"  ✓ {os.path.basename(path)}")
@@ -528,6 +586,16 @@ def main():
     ucr_coords = parse_bed4(t2t_bed)
     print(f"  {len(ucr_coords)} UCR regions loaded.")
 
+    # Append the litmus control so it is evaluated alongside real UCRs.
+    # Its sequence is not extracted from the 2bit file (it won't be in
+    # ucr_seqs); only the uniqueness metrics are needed for the check.
+    r = LITMUS_CONTROL_REGION
+    print(
+        f"  Injecting litmus control: {LITMUS_CONTROL_ID} "
+        f"({r['chrom']}:{r['start']}-{r['end']})"
+    )
+    ucr_coords_for_analysis = ucr_coords + [LITMUS_CONTROL_REGION]
+
     # ── Step 5: Load validation results ──
     validation = load_validation_results(alignment_report)
     if validation:
@@ -554,7 +622,7 @@ def main():
         unique_by_chrom, strict_filter = load_unique_intervals(bed)
         print(f"    strict score filter: {strict_filter}")
 
-        for ucr in ucr_coords:
+        for ucr in ucr_coords_for_analysis:
             chrom = ucr["chrom"]
             ucr_start = ucr["start"]
             ucr_end = ucr["end"]
@@ -607,13 +675,19 @@ def main():
     )
 
     # ── Print summary to stdout ──
+    ucr_rows_final = [
+        r for r in per_region_rows if r["ucr_id"] != LITMUS_CONTROL_ID
+    ]
+    litmus_rows_final = [
+        r for r in per_region_rows if r["ucr_id"] == LITMUS_CONTROL_ID
+    ]
     print(f"\n{'=' * 60}")
     print("  UCR UNIQUENESS ANALYSIS COMPLETE")
     print(f"{'=' * 60}")
     print(f"  UCRs analyzed:          {len(ucr_coords)}")
     print(f"  K-mer sizes:            {', '.join(str(k) for k in kmers)}")
     for k in kmers:
-        k_rows = [r for r in per_region_rows if r["kmer"] == k]
+        k_rows = [r for r in ucr_rows_final if r["kmer"] == k]
         fully_unique = sum(
             1 for r in k_rows if r["unique_bp"] == r["ucr_length"]
         )
@@ -626,6 +700,25 @@ def main():
             if v.get("identical", "").upper() == "YES"
         )
         print(f"  Validation:             {ident}/{len(validation)} identical")
+    if litmus_rows_final:
+        litmus_passed = all(
+            r["unique_fraction"] <= LITMUS_MAX_UNIQUE_FRACTION
+            for r in litmus_rows_final
+        )
+        status = "✓ PASSED" if litmus_passed else "✗ FAILED"
+        print(f"  Litmus test:            {status}  ({LITMUS_CONTROL_ID})")
+        for r in litmus_rows_final:
+            print(
+                f"    k={r['kmer']}: unique_fraction="
+                f"{r['unique_fraction']:.4f} "
+                f"(threshold ≤ {LITMUS_MAX_UNIQUE_FRACTION})"
+            )
+        if not litmus_passed:
+            print(
+                "  ⚠  LITMUS TEST FAILED: the unique-overlap method may "
+                "not be working correctly – investigate before trusting "
+                "uniqueness results."
+            )
     print(f"{'=' * 60}")
     print(f"\n  Reports:")
     print(f"    {report_tsv}")

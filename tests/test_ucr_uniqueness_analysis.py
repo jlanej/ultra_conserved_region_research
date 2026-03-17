@@ -356,3 +356,134 @@ class TestWriteSummary:
         assert k24["partially_unique_ucrs"] == 1
         assert payload["validation"]["paired_ucrs"] == 2
         assert payload["validation"]["identical_sequences"] == 1
+
+
+# ===========================================================================
+# 10. Litmus control
+# ===========================================================================
+
+
+class TestLitmusControl:
+    """Tests for the built-in litmus control region and validation logic."""
+
+    def test_litmus_control_constants_defined(self):
+        """LITMUS_CONTROL_REGION has valid BED4-compatible fields."""
+        r = ua.LITMUS_CONTROL_REGION
+        assert isinstance(r["chrom"], str) and r["chrom"]
+        assert isinstance(r["start"], int)
+        assert isinstance(r["end"], int)
+        assert r["end"] > r["start"], "end must be > start"
+        assert r["name"] == ua.LITMUS_CONTROL_ID
+        assert 0.0 < ua.LITMUS_MAX_UNIQUE_FRACTION < 1.0
+
+    def test_litmus_detected_as_non_unique_with_no_intervals(self):
+        """If no unique intervals exist the control has unique_fraction 0."""
+        region = ua.LITMUS_CONTROL_REGION
+        unique_bp = ua.compute_overlap_bp(region["start"], region["end"], [])
+        ucr_len = region["end"] - region["start"]
+        unique_fraction = unique_bp / ucr_len
+        assert unique_fraction == 0.0
+        assert unique_fraction <= ua.LITMUS_MAX_UNIQUE_FRACTION
+
+    def test_litmus_passes_when_non_unique(self):
+        """Litmus logic correctly reports PASSED when unique_fraction is 0."""
+        rows = [
+            {
+                "ucr_id": ua.LITMUS_CONTROL_ID, "kmer": 24,
+                "ucr_length": 1000, "unique_bp": 0,
+                "unique_fraction": 0.0,
+            },
+        ]
+        passed = all(
+            r["unique_fraction"] <= ua.LITMUS_MAX_UNIQUE_FRACTION
+            for r in rows
+        )
+        assert passed
+
+    def test_litmus_fails_when_all_bases_appear_unique(self):
+        """Litmus logic correctly reports FAILED when unique_fraction is 1."""
+        rows = [
+            {
+                "ucr_id": ua.LITMUS_CONTROL_ID, "kmer": 24,
+                "ucr_length": 1000, "unique_bp": 1000,
+                "unique_fraction": 1.0,
+            },
+        ]
+        passed = all(
+            r["unique_fraction"] <= ua.LITMUS_MAX_UNIQUE_FRACTION
+            for r in rows
+        )
+        assert not passed
+
+    def test_litmus_excluded_from_ucr_summary_stats(self, tmp_path):
+        """LITMUS_CONTROL rows do not inflate aggregate UCR statistics."""
+        path = tmp_path / "summary.json"
+        rows = [
+            {
+                "ucr_id": "42", "kmer": 24,
+                "ucr_length": 200, "unique_bp": 200,
+            },
+            {
+                "ucr_id": ua.LITMUS_CONTROL_ID, "kmer": 24,
+                "ucr_length": 1000, "unique_bp": 0,
+                "unique_fraction": 0.0,
+            },
+        ]
+        ua.write_summary(str(path), rows, {}, kmers=(24,), total_ucrs_lifted=1)
+        payload = json.loads(path.read_text())
+
+        k24 = payload["per_kmer_summary"]["24"]
+        # Only the real UCR (200 bp) should be counted.
+        assert k24["total_ucr_bp"] == 200
+        assert k24["fully_unique_ucrs"] == 1
+        assert k24["not_unique_ucrs"] == 0
+
+    def test_litmus_section_present_in_summary_when_control_included(
+        self, tmp_path
+    ):
+        """write_summary() adds a litmus_test section when control rows exist."""
+        path = tmp_path / "summary.json"
+        rows = [
+            {
+                "ucr_id": "42", "kmer": 24,
+                "ucr_length": 200, "unique_bp": 200,
+            },
+            {
+                "ucr_id": ua.LITMUS_CONTROL_ID, "kmer": 24,
+                "ucr_length": 1000, "unique_bp": 0,
+                "unique_fraction": 0.0,
+            },
+        ]
+        ua.write_summary(str(path), rows, {}, kmers=(24,), total_ucrs_lifted=1)
+        payload = json.loads(path.read_text())
+
+        assert "litmus_test" in payload
+        lt = payload["litmus_test"]
+        assert lt["overall_passed"] is True
+        assert "24" in lt["per_kmer"]
+        assert lt["per_kmer"]["24"]["unique_fraction"] == 0.0
+        assert lt["per_kmer"]["24"]["passed"] is True
+        assert lt["expected_unique_fraction_max"] == ua.LITMUS_MAX_UNIQUE_FRACTION
+
+    def test_litmus_section_absent_when_no_control_rows(self, tmp_path):
+        """write_summary() omits litmus_test when no control rows are present."""
+        path = tmp_path / "summary.json"
+        rows = [{"ucr_id": "42", "kmer": 24, "ucr_length": 200, "unique_bp": 200}]
+        ua.write_summary(str(path), rows, {}, kmers=(24,), total_ucrs_lifted=1)
+        payload = json.loads(path.read_text())
+        assert "litmus_test" not in payload
+
+    def test_litmus_fails_reflected_in_summary(self, tmp_path):
+        """overall_passed is False when any kmer row exceeds the threshold."""
+        path = tmp_path / "summary.json"
+        rows = [
+            {
+                "ucr_id": ua.LITMUS_CONTROL_ID, "kmer": 24,
+                "ucr_length": 1000, "unique_bp": 1000,
+                "unique_fraction": 1.0,
+            },
+        ]
+        ua.write_summary(str(path), rows, {}, kmers=(24,), total_ucrs_lifted=0)
+        payload = json.loads(path.read_text())
+        assert payload["litmus_test"]["overall_passed"] is False
+        assert payload["litmus_test"]["per_kmer"]["24"]["passed"] is False
