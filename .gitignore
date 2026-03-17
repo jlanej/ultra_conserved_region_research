@@ -20,6 +20,8 @@ twoBitToFa
 *.2bit
 *.sif
 hs1.unique_fraction_*
+ucr_uniqueness_report.tsv
+ucr_uniqueness_summary.json
 
 # IDE
 .idea/
