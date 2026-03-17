@@ -264,7 +264,7 @@ apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_r
 Optional flags:
 
 ```bash
-# Analyse only a subset of k-mer sizes
+# Analyze only a subset of k-mer sizes
 apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest \
     python /app/ucr_uniqueness_analysis.py --kmers 24,50,100
 
