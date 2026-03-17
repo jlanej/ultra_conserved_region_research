@@ -235,6 +235,79 @@ track behaves as binary intervals or contains scored values. If scored values
 are present, the numerator keeps only intervals at the maximum score (i.e.
 strictly unique regions) and excludes lower-scored/partial intervals.
 
+### End-to-end UCR uniqueness analysis (Apptainer one-liner)
+
+A single command that runs the **complete pipeline** — liftover, sequence
+validation, and per-UCR k-mer uniqueness overlap — producing a comprehensive
+report showing which portions of each ultraconserved region are uniquely
+mappable on T2T-CHM13:
+
+```bash
+apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest \
+    python /app/ucr_uniqueness_analysis.py
+```
+
+**What it does (automatically, in order):**
+
+1. **Liftover** – runs `convert_ucr_to_t2t.py` to lift UCR coordinates from
+   hg38 to T2T-CHM13v2.0 (skipped if `ucr_t2t_chm13.bed` already exists).
+2. **Validation** – runs `validate_liftover.py` to extract sequences from both
+   assemblies and perform per-base pairwise alignment.
+3. **Sequence extraction** – extracts the T2T UCR sequences from `hs1.2bit`
+   (downloads ~780 MB on first run).
+4. **K-mer uniqueness** – for each k-mer size, downloads the UCSC
+   `hoffmanMappability` track, intersects every lifted UCR with the unique
+   intervals, and computes what fraction of each UCR is uniquely mappable.
+5. **Reports** – writes a per-region TSV and a JSON summary with both
+   validation and uniqueness metrics.
+
+Optional flags:
+
+```bash
+# Analyze only a subset of k-mer sizes
+apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest \
+    python /app/ucr_uniqueness_analysis.py --kmers 24,50,100
+
+# Skip the validation step (faster if you only need uniqueness)
+apptainer exec --bind "$(pwd):/output" docker://ghcr.io/jlanej/ultra_conserved_region_research:latest \
+    python /app/ucr_uniqueness_analysis.py --skip-validation
+```
+
+**Output files:**
+
+| File | Description |
+|---|---|
+| `ucr_uniqueness_report.tsv` | Per-region, per-kmer uniqueness metrics with full UCR and non-unique sequences |
+| `ucr_uniqueness_summary.json` | Overall pipeline summary including validation and per-kmer aggregates |
+| *(plus all liftover and validation output files listed above)* | |
+
+`ucr_uniqueness_report.tsv` columns:
+
+| Column | Meaning |
+|---|---|
+| `ucr_id` | UCR region identifier. |
+| `t2t_chrom` | T2T-CHM13 chromosome after liftover. |
+| `t2t_start` | T2T-CHM13 start coordinate (0-based). |
+| `t2t_end` | T2T-CHM13 end coordinate (half-open). |
+| `ucr_length` | Length of the UCR in base pairs. |
+| `identity_pct` | Sequence identity between hg38 and T2T from validation (empty if validation was skipped). |
+| `kmer` | K-mer size used for the uniqueness track. |
+| `unique_bp` | Base pairs within the UCR covered by strictly unique intervals. |
+| `unique_fraction` | `unique_bp / ucr_length` (0–1). |
+| `non_unique_bp` | Base pairs within the UCR NOT covered by unique intervals. |
+| `non_unique_fraction` | `non_unique_bp / ucr_length` (0–1). |
+| `ucr_sequence` | Full T2T UCR nucleotide sequence. |
+| `non_unique_sequence` | Concatenated bases at non-unique positions within the UCR. Empty if the entire UCR is uniquely mappable at that k-mer size. |
+
+`ucr_uniqueness_summary.json` structure:
+
+| Field | Meaning |
+|---|---|
+| `kmers_analyzed` | List of k-mer sizes evaluated. |
+| `total_ucrs_lifted_over` | Number of UCRs successfully lifted to T2T. |
+| `per_kmer_summary.{k}` | Per-kmer aggregate: `total_ucr_bp`, `total_unique_bp`, `overall_unique_fraction`, `fully_unique_ucrs`, `partially_unique_ucrs`, `not_unique_ucrs`. |
+| `validation` | Validation aggregate: `paired_ucrs`, `identical_sequences`, `average_identity_pct`. |
+
 ## Running locally
 
 ### Prerequisites
@@ -255,9 +328,12 @@ python validate_liftover.py
 
 # Step 3: hs1 unique fraction summary across multiple kmers (optional)
 python compute_unique_fraction.py
+
+# Step 4: End-to-end UCR uniqueness analysis (runs steps 1–3 automatically)
+python ucr_uniqueness_analysis.py
 ```
 
-Both scripts are self-contained: they download all required data files and
+All scripts are self-contained: they download all required data files and
 tools automatically on first run. Subsequent runs skip downloads if the files
 are already present.
 
@@ -271,6 +347,9 @@ docker run --rm -v "$(pwd)/results:/output" ucr-liftover
 
 # Step 2: Sequence validation (optional)
 docker run --rm -v "$(pwd)/results:/output" ucr-liftover /app/validate_liftover.py
+
+# Step 3: End-to-end uniqueness analysis (runs liftover + validation + k-mer overlap)
+docker run --rm -v "$(pwd)/results:/output" ucr-liftover /app/ucr_uniqueness_analysis.py
 ```
 
 Results will appear in the `results/` directory.
@@ -282,13 +361,16 @@ Results will appear in the `results/` directory.
 ├── convert_ucr_to_t2t.py          # Liftover pipeline (hg38 → T2T-CHM13)
 ├── validate_liftover.py           # Sequence extraction and pairwise alignment
 ├── compute_unique_fraction.py     # hs1 strict unique mappability summary across multiple kmers
+├── ucr_uniqueness_analysis.py     # End-to-end UCR uniqueness: liftover → validation → k-mer overlap
 ├── requirements.txt               # Python dependencies
 ├── Dockerfile                     # Docker container definition
 ├── Apptainer.def                  # Apptainer/Singularity definition (HPC)
 ├── resources/
 │   └── hg38.ultraConserved.bb     # Bundled UCSC ultras bigBed source (hg38)
 ├── tests/
-│   └── test_convert_ucr_to_t2t.py # Integration tests
+│   ├── test_convert_ucr_to_t2t.py # Integration tests (liftover)
+│   ├── test_compute_unique_fraction.py  # Unit tests (k-mer analysis)
+│   └── test_ucr_uniqueness_analysis.py  # Unit tests (UCR uniqueness)
 ├── .github/workflows/
 │   ├── docker-build-publish.yml   # Build & push image to GHCR
 │   └── ucr-liftover.yml           # Run liftover and commit results

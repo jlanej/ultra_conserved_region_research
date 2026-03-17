@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY convert_ucr_to_t2t.py .
 COPY validate_liftover.py .
 COPY compute_unique_fraction.py .
+COPY ucr_uniqueness_analysis.py .
 COPY resources/ ./resources/
 
 # Bake the UCSC binaries into the image (small tools, ~3 MB each).

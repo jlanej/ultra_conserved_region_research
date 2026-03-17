@@ -9,6 +9,7 @@ From: python:3.12-slim
     convert_ucr_to_t2t.py /app/convert_ucr_to_t2t.py
     validate_liftover.py /app/validate_liftover.py
     compute_unique_fraction.py /app/compute_unique_fraction.py
+    ucr_uniqueness_analysis.py /app/ucr_uniqueness_analysis.py
     requirements.txt /app/requirements.txt
     resources /app/resources
 
@@ -56,6 +57,9 @@ From: python:3.12-slim
     Compute strict hs1 unique-genome summary across k24,k36,k50,k100,k150,k250:
         apptainer exec --bind "$(pwd):/output" ucr-liftover.sif python /app/compute_unique_fraction.py
 
+    End-to-end UCR uniqueness analysis (liftover + validation + per-UCR k-mer overlap):
+        apptainer exec --bind "$(pwd):/output" ucr-liftover.sif python /app/ucr_uniqueness_analysis.py
+
     Output files (liftover):
         ucr_hg38.bed            - input UCR coordinates (hg38)
         ucr_t2t_chm13.bed       - mapped coordinates (T2T-CHM13)
@@ -67,6 +71,10 @@ From: python:3.12-slim
         ucr_sequences_t2t.fa        - extracted T2T-CHM13 UCR sequences
         ucr_alignment_report.tsv    - per-region alignment statistics
         ucr_alignment_details.txt   - visual alignments for divergent pairs
+
+    Output files (uniqueness analysis):
+        ucr_uniqueness_report.tsv   - per-region, per-kmer uniqueness with sequences
+        ucr_uniqueness_summary.json - overall pipeline summary
 
     Override output directory:
         OUTPUT_DIR=/scratch/proj apptainer run ucr-liftover.sif
